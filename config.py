@@ -104,11 +104,18 @@ class ScoringConfig:
     buy_strong: int = 8                 # Score 8-9: buy 30%
     buy_maximum: int = 10               # Score 10+: buy 40%
 
-    # Buy capital allocation (% of available) — wider spread to concentrate on high-conviction
-    buy_light_pct: float = 0.10          # Score 5-6: small position (marginal signal)
-    buy_moderate_pct: float = 0.30       # Score 7: meaningful (100% win rate historically)
-    buy_strong_pct: float = 0.45         # Score 8-9: aggressive
-    buy_maximum_pct: float = 0.60        # Score 10+: max conviction
+    # Buy capital allocation — opportunity-sized (v2.9)
+    buy_light_pct: float = 0.08          # Score 5: probe (was 0.10)
+    buy_moderate_pct: float = 0.28       # Score 6-7: confirmed setup (was 0.30)
+    buy_strong_pct: float = 0.48         # Score 8-9: strong signal (was 0.45)
+    buy_maximum_pct: float = 0.60        # Score 10+: max conviction (was 0.60, unchanged)
+
+    # DCA escalation (v2.9)
+    dca_multiplier_2nd: float = 1.5      # 2nd position: 1.5× base size
+    dca_multiplier_3rd: float = 2.0      # 3rd+ position: 2.0× base size
+    dca_score_min_2nd: int = 6           # Min score to open 2nd position in same asset
+    dca_score_min_3rd: int = 7           # Min score to open 3rd+ position in same asset
+    dca_max_per_trade_pct: float = 0.50  # Hard cap: no single trade > 50% of available
 
     # Sell score thresholds (raised: score-4 sells had 43% win rate — too early)
     sell_no_action: int = 4
@@ -143,7 +150,8 @@ class RiskConfig:
     max_per_trade_pct: float = 0.40     # Max 40% of available per trade
     min_reserve_pct: float = 0.10       # Always keep 10% in USDT
     min_order_usdt: float = 10.0        # Bybit minimum
-    max_open_positions_per_asset: int = 10
+    max_open_positions_per_asset: int = 4   # was 10 — cap DCA at 4 levels
+    min_entry_spread_pct: float = 0.02      # New entry must be ≥2% below cheapest open entry
 
     # Portfolio limits
     max_daily_loss_pct: float = 0.05    # -5% daily circuit breaker
