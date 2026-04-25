@@ -178,12 +178,16 @@ class SwingBot:
         available = portfolio_data["available_usdt"]
         total = portfolio_data["total_usdt"]
 
-        amount = strategy.calc_buy_amount(buy_score, available, total)
+        open_positions = db.get_open_positions(symbol)
+        amount = strategy.calc_buy_amount(buy_score, available, total, open_positions)
         if amount <= 0:
             logger.info(f"{symbol}: Buy score {buy_score} but insufficient funds or below minimum")
             return False
 
-        allowed, reason = risk_manager.can_buy(symbol, amount, available, total)
+        allowed, reason = risk_manager.can_buy(
+            symbol, amount, available, total,
+            current_price=price, buy_score=buy_score,
+        )
         if not allowed:
             logger.info(f"{symbol}: Buy blocked - {reason}")
             return False
@@ -610,7 +614,7 @@ class SwingBot:
     async def start(self):
         """Start the bot."""
         logger.info("=" * 50)
-        logger.info("Swing Trading Bot v2.8 starting...")
+        logger.info("Swing Trading Bot v2.9 starting...")
         logger.info("=" * 50)
 
         if not config.exchange.api_key:
@@ -663,7 +667,7 @@ class SwingBot:
         self.scheduler.start()
 
         notifier.send_sync(
-            f"🚀 <b>Swing Trading Bot v2.8 iniciado</b>\n\n"
+            f"🚀 <b>Swing Trading Bot v2.9 iniciado</b>\n\n"
             f"💵 Balance: ${balance:.2f} USDT\n"
             f"📊 Pares: {', '.join(config.pairs.symbols)}\n"
             f"⏱ Scan cada {config.scanning.interval_minutes} min\n"
