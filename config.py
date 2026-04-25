@@ -99,15 +99,15 @@ class ScoringConfig:
     """Score thresholds for buy/sell actions."""
     # Buy score thresholds
     buy_no_action: int = 4              # Score 0-4: don't buy
-    buy_light: int = 5                  # Score 5-6: buy 10%
-    buy_moderate: int = 7               # Score 7-8: buy 20%
-    buy_strong: int = 8                 # Score 8-9: buy 30%
-    buy_maximum: int = 10               # Score 10+: buy 40%
+    buy_light: int = 5                  # Score 5: buy 8%
+    buy_moderate: int = 6               # Score 6: buy 28%
+    buy_strong: int = 7                 # Score 7-9: buy 48%
+    buy_maximum: int = 10               # Score 10+: buy 60%
 
     # Buy capital allocation — opportunity-sized (v2.9)
-    buy_light_pct: float = 0.08          # Score 5-6: probe (was 0.10)
-    buy_moderate_pct: float = 0.28       # Score 7: confirmed setup (was 0.30)
-    buy_strong_pct: float = 0.48         # Score 8-9: strong signal (was 0.45)
+    buy_light_pct: float = 0.08          # Score 5: probe (was 0.10)
+    buy_moderate_pct: float = 0.28       # Score 6: confirmed setup (was 0.30)
+    buy_strong_pct: float = 0.48         # Score 7-9: strong signal (was 0.45)
     buy_maximum_pct: float = 0.60        # Score 10+: max conviction (was 0.60, unchanged)
 
     # DCA escalation (v2.9)

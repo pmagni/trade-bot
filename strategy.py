@@ -378,8 +378,15 @@ class Strategy:
     # ═══════════════════════════════════════
 
     def calc_buy_amount(self, buy_score: int, available_usdt: float,
-                        total_portfolio: float) -> float:
-        """Calculate how much USDT to spend based on buy score."""
+                        total_portfolio: float, open_positions: list = None) -> float:
+        """
+        Calculate how much USDT to spend based on buy score and DCA position.
+        Applies escalating multipliers when adding to an existing position:
+          - 1st entry: 1.0× base size
+          - 2nd entry: 1.5× base size (requires score ≥6 — enforced in risk_manager)
+          - 3rd+ entry: 2.0× base size (requires score ≥7 — enforced in risk_manager)
+        Hard cap: no single trade > dca_max_per_trade_pct of available.
+        """
         SC = config.scoring
         RC = config.risk
 
@@ -388,22 +395,28 @@ class Strategy:
         if max_deployable <= 0:
             return 0
 
-        # Determine allocation percentage
+        # Base size by opportunity tier
         if buy_score >= SC.buy_maximum:
-            pct = SC.buy_maximum_pct
+            base_pct = SC.buy_maximum_pct
         elif buy_score >= SC.buy_strong:
-            pct = SC.buy_strong_pct
+            base_pct = SC.buy_strong_pct
         elif buy_score >= SC.buy_moderate:
-            pct = SC.buy_moderate_pct
-        elif buy_score >= SC.buy_light:
-            pct = SC.buy_light_pct
+            base_pct = SC.buy_moderate_pct
         else:
-            return 0
+            base_pct = SC.buy_light_pct  # score 5-6: probe
 
-        amount = max_deployable * pct
+        amount = max_deployable * base_pct
 
-        # Apply max per trade limit
-        amount = min(amount, available_usdt * RC.max_per_trade_pct)
+        # DCA escalation multiplier based on existing open positions in this asset
+        pos_count = len(open_positions) if open_positions else 0
+        if pos_count >= 2:
+            amount *= SC.dca_multiplier_3rd
+        elif pos_count == 1:
+            amount *= SC.dca_multiplier_2nd
+
+        # Hard cap: never more than 50% of available in one trade
+        cap = available_usdt * SC.dca_max_per_trade_pct
+        amount = min(amount, cap)
 
         # If below minimum but funds are available, floor to minimum order
         if amount < RC.min_order_usdt:
