@@ -10,12 +10,14 @@ from database import db
 logger = logging.getLogger("risk")
 
 RC = config.risk
+SC = config.scoring
 
 
 class RiskManager:
 
     def can_buy(self, symbol: str, amount_usdt: float,
-                available_usdt: float, total_portfolio: float) -> tuple[bool, str]:
+                available_usdt: float, total_portfolio: float,
+                current_price: float = 0.0, buy_score: int = 0) -> tuple[bool, str]:
         """
         Check all risk rules before placing a buy.
         Returns (allowed, reason).
@@ -29,9 +31,31 @@ class RiskManager:
             return False, f"{symbol} buy on cooldown"
 
         # Max open positions per asset
-        open_count = db.count_open_positions(symbol)
+        open_positions = db.get_open_positions(symbol)
+        open_count = len(open_positions)
         if open_count >= RC.max_open_positions_per_asset:
             return False, f"{symbol} max {RC.max_open_positions_per_asset} open positions reached"
+
+        # Minimum entry spread: new entry must be ≥2% below cheapest existing open entry
+        if current_price > 0 and open_positions:
+            cheapest = min(p["entry_price"] for p in open_positions)
+            spread = (cheapest - current_price) / cheapest
+            if spread < RC.min_entry_spread_pct:
+                return False, (
+                    f"{symbol}: precio ${current_price:.2f} no está "
+                    f"{RC.min_entry_spread_pct:.0%} bajo entry más barato "
+                    f"${cheapest:.2f} (spread {spread:.2%})"
+                )
+
+        # Score gate: 2nd entry needs score≥6, 3rd+ needs score≥7
+        if buy_score > 0 and open_count > 0:
+            min_score = (SC.dca_score_min_3rd if open_count >= 2
+                         else SC.dca_score_min_2nd)
+            if buy_score < min_score:
+                return False, (
+                    f"{symbol}: necesita score ≥{min_score} para "
+                    f"entrada #{open_count + 1} (actual {buy_score})"
+                )
 
         # Minimum order
         if amount_usdt < RC.min_order_usdt:
