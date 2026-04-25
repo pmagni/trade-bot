@@ -41,11 +41,18 @@ class RiskManager:
             cheapest = min(p["entry_price"] for p in open_positions)
             spread = (cheapest - current_price) / cheapest
             if spread < RC.min_entry_spread_pct:
-                return False, (
-                    f"{symbol}: precio ${current_price:.2f} no está "
-                    f"{RC.min_entry_spread_pct:.0%} bajo entry más barato "
-                    f"${cheapest:.2f} (spread {spread:.2%})"
-                )
+                if spread <= 0:
+                    msg = (
+                        f"{symbol}: precio ${current_price:.2f} está por encima del "
+                        f"entry más barato ${cheapest:.2f} — no se añade a posición al alza"
+                    )
+                else:
+                    msg = (
+                        f"{symbol}: precio ${current_price:.2f} no está "
+                        f"{RC.min_entry_spread_pct:.0%} bajo entry más barato "
+                        f"${cheapest:.2f} (spread {spread:.2%})"
+                    )
+                return False, msg
 
         # Score gate: 2nd entry needs score≥6, 3rd+ needs score≥7
         if buy_score > 0 and open_count > 0:
