@@ -105,8 +105,8 @@ class ScoringConfig:
     buy_maximum: int = 10               # Score 10+: buy 40%
 
     # Buy capital allocation — opportunity-sized (v2.9)
-    buy_light_pct: float = 0.08          # Score 5: probe (was 0.10)
-    buy_moderate_pct: float = 0.28       # Score 6-7: confirmed setup (was 0.30)
+    buy_light_pct: float = 0.08          # Score 5-6: probe (was 0.10)
+    buy_moderate_pct: float = 0.28       # Score 7: confirmed setup (was 0.30)
     buy_strong_pct: float = 0.48         # Score 8-9: strong signal (was 0.45)
     buy_maximum_pct: float = 0.60        # Score 10+: max conviction (was 0.60, unchanged)
 
