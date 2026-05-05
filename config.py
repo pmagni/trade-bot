@@ -183,32 +183,32 @@ class KeyLevelsConfig:
     Optional stop_level overrides percentage-based stop-loss."""
     levels: dict = field(default_factory=lambda: {
         "BTCUSDT": {
-            # Updated Apr 15 — BTC at $75,028
+            # Updated May 5 — BTC at $80,530 (broke out above $78K resistance)
             "supports": [
-                {"price": 73000,  "label": "Recent support zone",             "score_bonus": 1},
-                {"price": 71000,  "label": "Prior breakout support",          "score_bonus": 2},
-                {"price": 69000,  "label": "Key support (accumulation)",      "score_bonus": 2},
-                {"price": 67000,  "label": "Deep structural support",         "score_bonus": 3},
+                {"price": 78000, "label": "Breakout → new support",       "score_bonus": 2},
+                {"price": 76000, "label": "Prior range high",              "score_bonus": 2},
+                {"price": 73000, "label": "Key accumulation zone",         "score_bonus": 2},
+                {"price": 69000, "label": "Deep structural support",       "score_bonus": 3},
             ],
             "resistances": [
-                {"price": 76500,  "label": "Recent swing high",       "score_bonus": 1},
-                {"price": 78000,  "label": "Psychological level",     "score_bonus": 2},
-                {"price": 80000,  "label": "Major round number",      "score_bonus": 2},
+                {"price": 82000, "label": "Next round number",             "score_bonus": 1},
+                {"price": 85000, "label": "Psychological target",          "score_bonus": 2},
+                {"price": 89000, "label": "Prior ATH zone",                "score_bonus": 3},
             ],
-            "stop_level": 67000,
+            "stop_level": 76000,
         },
         "ETHUSDT": {
-            # Updated Apr 15 — ETH at $2,372
+            # Updated May 5 — ETH at $2,365 (recovered from April lows)
             "supports": [
-                {"price": 2300, "label": "Recent support zone",      "score_bonus": 1},
-                {"price": 2200, "label": "Prior resistance → support", "score_bonus": 2},
-                {"price": 2100, "label": "Strong support",            "score_bonus": 2},
-                {"price": 2000, "label": "Deep structural support",   "score_bonus": 3},
+                {"price": 2250, "label": "Recent consolidation zone",      "score_bonus": 1},
+                {"price": 2100, "label": "Prior resistance → support",      "score_bonus": 2},
+                {"price": 2000, "label": "Strong structural support",       "score_bonus": 2},
+                {"price": 1850, "label": "Deep structural support",         "score_bonus": 3},
             ],
             "resistances": [
-                {"price": 2500, "label": "Psychological level",    "score_bonus": 1},
-                {"price": 2650, "label": "Range high target",      "score_bonus": 2},
-                {"price": 2800, "label": "Major resistance",       "score_bonus": 2},
+                {"price": 2450, "label": "Near-term resistance",           "score_bonus": 1},
+                {"price": 2650, "label": "Range high target",              "score_bonus": 2},
+                {"price": 2800, "label": "Major resistance",               "score_bonus": 2},
             ],
             "stop_level": 2000,
         },
