@@ -70,6 +70,9 @@ class SwingBot:
                     buy_threshold = config.scoring.buy_light
                     if not signals["indicators"].get("above_ema_200", True):
                         buy_threshold = max(buy_threshold, 6)  # Downtrend: need score 6+
+                    # Symbol-specific minimum: BTC requires score≥6 (score-5 BTC historically underperforms)
+                    if symbol == "BTCUSDT":
+                        buy_threshold = max(buy_threshold, config.scoring.btc_min_buy_score)
                     signals["buy_threshold"] = buy_threshold
 
                     if signals["buy_score"] >= buy_threshold:
@@ -614,7 +617,7 @@ class SwingBot:
     async def start(self):
         """Start the bot."""
         logger.info("=" * 50)
-        logger.info("Swing Trading Bot v2.9 starting...")
+        logger.info("Swing Trading Bot v2.10 starting...")
         logger.info("=" * 50)
 
         if not config.exchange.api_key:
@@ -667,7 +670,7 @@ class SwingBot:
         self.scheduler.start()
 
         notifier.send_sync(
-            f"🚀 <b>Swing Trading Bot v2.9 iniciado</b>\n\n"
+            f"🚀 <b>Swing Trading Bot v2.10 iniciado</b>\n\n"
             f"💵 Balance: ${balance:.2f} USDT\n"
             f"📊 Pares: {', '.join(config.pairs.symbols)}\n"
             f"⏱ Scan cada {config.scanning.interval_minutes} min\n"

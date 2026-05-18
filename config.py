@@ -117,6 +117,11 @@ class ScoringConfig:
     dca_score_min_3rd: int = 7           # Min score to open 3rd+ position in same asset
     dca_max_per_trade_pct: float = 0.50  # Hard cap: no single trade > 50% of available
 
+    # Symbol-specific minimum buy scores (v2.10)
+    # BTC score-5 trades: 55% win rate, +0.3% avg — below acceptable threshold
+    # BTC score-6 trades: 100% win rate, +3.5% avg — require confirmed signal
+    btc_min_buy_score: int = 6           # BTC needs stronger confirmation than ETH
+
     # Sell score thresholds (raised: score-4 sells had 43% win rate — too early)
     sell_no_action: int = 4
     sell_partial: int = 5               # Score 5-6: sell 25%
