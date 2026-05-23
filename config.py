@@ -188,34 +188,35 @@ class KeyLevelsConfig:
     Optional stop_level overrides percentage-based stop-loss."""
     levels: dict = field(default_factory=lambda: {
         "BTCUSDT": {
-            # Updated May 5 — BTC at $80,530 (broke out above $78K resistance)
+            # Updated May 23 — BTC at ~$74,600 (pulled back from $80K, $78K support broken)
+            # stop_level lowered to $70K so 5% pct_stop always wins for entries above $73.7K
             "supports": [
-                {"price": 78000, "label": "Breakout → new support",       "score_bonus": 2},
-                {"price": 76000, "label": "Prior range high",              "score_bonus": 2},
-                {"price": 73000, "label": "Key accumulation zone",         "score_bonus": 2},
-                {"price": 69000, "label": "Deep structural support",       "score_bonus": 3},
+                {"price": 74000, "label": "Current floor / recent low",    "score_bonus": 1},
+                {"price": 71000, "label": "Prior consolidation zone",      "score_bonus": 2},
+                {"price": 69000, "label": "Key accumulation zone",         "score_bonus": 3},
+                {"price": 65000, "label": "Deep structural support",       "score_bonus": 3},
             ],
             "resistances": [
-                {"price": 82000, "label": "Next round number",             "score_bonus": 1},
-                {"price": 85000, "label": "Psychological target",          "score_bonus": 2},
-                {"price": 89000, "label": "Prior ATH zone",                "score_bonus": 3},
+                {"price": 76000, "label": "Broken support → resistance",   "score_bonus": 1},
+                {"price": 78000, "label": "Prior range high",              "score_bonus": 2},
+                {"price": 80000, "label": "Round number / recent high",    "score_bonus": 2},
             ],
-            "stop_level": 76000,
+            "stop_level": 70000,
         },
         "ETHUSDT": {
-            # Updated May 5 — ETH at $2,365 (recovered from April lows)
+            # Updated May 23 — ETH at ~$2,029 ($2,100 and $2,250 supports broken)
             "supports": [
-                {"price": 2250, "label": "Recent consolidation zone",      "score_bonus": 1},
-                {"price": 2100, "label": "Prior resistance → support",      "score_bonus": 2},
-                {"price": 2000, "label": "Strong structural support",       "score_bonus": 2},
-                {"price": 1850, "label": "Deep structural support",         "score_bonus": 3},
+                {"price": 2000, "label": "Round number / structural floor", "score_bonus": 2},
+                {"price": 1900, "label": "Prior consolidation zone",        "score_bonus": 2},
+                {"price": 1800, "label": "Key accumulation zone",           "score_bonus": 3},
+                {"price": 1600, "label": "Deep structural support",         "score_bonus": 3},
             ],
             "resistances": [
-                {"price": 2450, "label": "Near-term resistance",           "score_bonus": 1},
-                {"price": 2650, "label": "Range high target",              "score_bonus": 2},
-                {"price": 2800, "label": "Major resistance",               "score_bonus": 2},
+                {"price": 2100, "label": "Broken support → resistance",    "score_bonus": 1},
+                {"price": 2250, "label": "Prior consolidation high",       "score_bonus": 2},
+                {"price": 2400, "label": "Major resistance zone",          "score_bonus": 2},
             ],
-            "stop_level": 2000,
+            "stop_level": 1850,
         },
     })
     tolerance_pct: float = 0.008  # 0.8% proximity threshold (was 0.5%)
