@@ -1,6 +1,7 @@
 """
 Swing Trading Bot - Risk Manager
 Enforces all risk rules: position limits, drawdown, circuit breakers.
+v2.12: crash detector (velocity + consecutive stop-losses), downtrend stop multiplier.
 """
 
 import logging
@@ -11,6 +12,7 @@ logger = logging.getLogger("risk")
 
 RC = config.risk
 SC = config.scoring
+CD = config.crash_detector
 
 
 class RiskManager:
@@ -95,6 +97,38 @@ class RiskManager:
 
         return True, "OK"
 
+    def check_crash_detector(self, symbol: str, above_ema200: bool = True) -> tuple[bool, str]:
+        """
+        v2.12 — Crash Detector: verifica si se deben suspender compras por:
+          1. Stop-losses consecutivos (waterfall protection)
+          2. Crash de velocidad (caída >10% en 24h) — delegado al bot.py via candles
+
+        Retorna (blocked, reason). Si blocked=True, no se debe comprar.
+        Esta función solo evalúa los SL consecutivos; el velocity check
+        se hace en bot.py donde se tienen los candles disponibles.
+        """
+        if not CD.enabled:
+            return False, ""
+
+        # Waterfall protection: ≥2 stop-losses en los últimos N días → pause extendida
+        recent_sl = db.count_recent_stop_losses(symbol, CD.consecutive_sl_days)
+        if recent_sl >= CD.consecutive_sl_limit:
+            # Verificar si ya hay cooldown activo por esto
+            if db.is_on_cooldown(symbol, "buy"):
+                return True, (
+                    f"Waterfall cooldown activo ({recent_sl} SL en {CD.consecutive_sl_days}d)"
+                )
+            # Activar pausa extendida
+            db.set_cooldown(symbol, "buy", CD.consecutive_sl_pause_hours * 60)
+            reason = (
+                f"WATERFALL: {recent_sl} stop-losses en {CD.consecutive_sl_days} dias → "
+                f"pausa {CD.consecutive_sl_pause_hours}h para {symbol}"
+            )
+            logger.warning(f"Crash detector [{symbol}]: {reason}")
+            return True, reason
+
+        return False, ""
+
     def can_sell(self, symbol: str) -> tuple[bool, str]:
         """Check if selling is allowed."""
         if db.is_on_cooldown(symbol, "sell"):
@@ -143,17 +177,33 @@ class RiskManager:
         db.set_cooldown(symbol, "buy", RC.cooldown_after_stop_loss)
 
     def calc_stop_loss_price(self, entry_price: float, leverage: float = 1.0,
-                             key_stop_level: float = 0) -> float:
+                             key_stop_level: float = 0,
+                             above_ema200: bool = True) -> float:
         """
-        Calculate stop-loss price.
-        Always uses at least the percentage-based stop.
-        If key_stop_level is provided, uses the tighter (higher) of the two —
-        ensuring structural levels never give WORSE protection than the percentage stop.
+        Calcula el precio de stop-loss.
+
+        v2.12: en downtrend (precio < EMA200), el stop se amplía ×downtrend_stop_multiplier
+        (5% → 8%) para evitar ser "gapeado" fuera de posición por caídas bruscas entre scans.
+        El stop más ancho acepta pérdidas algo mayores per-trade a cambio de no ser expulsado
+        por volatilidad normal en un mercado bajista.
+
+        Siempre usa al menos el stop porcentual. Si key_stop_level está disponible,
+        usa el más ajustado (más alto) de los dos — la barrera estructural nunca puede
+        dar PEOR protección que el porcentual.
         """
-        sl_pct = RC.leverage_stop_loss_pct if leverage > 1 else RC.stop_loss_pct
+        if leverage > 1:
+            sl_pct = RC.leverage_stop_loss_pct
+        elif not above_ema200 and CD.enabled:
+            # Downtrend: stop más ancho para sobrevivir volatilidad intracandle
+            sl_pct = RC.stop_loss_pct * CD.downtrend_stop_multiplier
+        else:
+            sl_pct = RC.stop_loss_pct
+
         pct_stop = entry_price * (1 - sl_pct)
+
         if key_stop_level > 0:
-            return max(pct_stop, key_stop_level)  # Higher price = tighter stop
+            # key_stop_level es siempre el más bajo → usarlo solo si queda más arriba que pct_stop
+            return max(pct_stop, key_stop_level)
         return pct_stop
 
 

@@ -144,10 +144,38 @@ class ScoringConfig:
 
 
 @dataclass
+class CrashDetectorConfig:
+    """
+    Crash detector — suspende compras automáticamente durante caídas aceleradas.
+
+    Lógica (v2.12):
+      - Si el precio cayó > crash_threshold_24h en las últimas 24h  → pausa por símbolo
+      - Si hay ≥ consecutive_sl_limit stop-losses en los últimos consecutive_sl_days días
+        para el mismo activo → pausa extendida por símbolo (waterfall protection)
+      - Ambas pausas usan el sistema de cooldowns de buy por símbolo.
+    """
+    enabled: bool = True
+
+    # Velocidad de caída: congela compras si el activo cayó más de X% en 24h
+    crash_threshold_24h: float = 0.10     # -10% en 24h → freeze buy por símbolo 48h
+    crash_pause_hours: int = 48           # Duración del freeze por crash
+
+    # Stop-losses consecutivos: waterfall protection
+    consecutive_sl_limit: int = 2         # ≥2 stop-losses en N días → pausa larga
+    consecutive_sl_days: int = 5          # Ventana de tiempo para contarlos
+    consecutive_sl_pause_hours: int = 168 # 7 días de pausa tras waterfall detectado
+
+    # Stop-loss más ancho cuando el precio está bajo EMA200 (downtrend)
+    # Evita "gapping" — ser forzado a salir muy por debajo del stop calculado
+    # entre scans de 5 min. En uptrend: stop = 5%. En downtrend: 5% × 1.6 = 8%
+    downtrend_stop_multiplier: float = 1.6   # multiplicador del stop_loss_pct en bear market
+
+
+@dataclass
 class RiskConfig:
     """Risk management parameters."""
     # Stop-loss
-    stop_loss_pct: float = 0.05         # -5% from entry
+    stop_loss_pct: float = 0.05         # -5% from entry (uptrend); ×1.6 en downtrend (v2.12)
     trailing_stop_activation: float = 0.015  # Activate trailing at +1.5% (was 3% — never triggered)
     trailing_stop_distance: float = 0.02    # 2% below max
 
@@ -160,7 +188,7 @@ class RiskConfig:
 
     # Portfolio limits
     max_daily_loss_pct: float = 0.05    # -5% daily circuit breaker
-    max_drawdown_pct: float = 0.15      # -15% total circuit breaker
+    max_drawdown_pct: float = 0.12      # -12% total circuit breaker (era 15% — activaba tarde)
 
     # Leverage (optional, disabled by default)
     leverage_enabled: bool = False
@@ -185,39 +213,47 @@ class RiskConfig:
 class KeyLevelsConfig:
     """Manual key support/resistance levels per asset (multi-tier).
     Each asset has lists of supports/resistances with price, label, and score_bonus.
-    Optional stop_level overrides percentage-based stop-loss."""
+    Optional stop_level overrides percentage-based stop-loss.
+
+    IMPORTANTE: actualizar al cambiar de régimen. El bot loguea WARNING si > 7 días sin cambio.
+    updated_at se usa solo para tracking — no tiene efecto en la lógica.
+    """
+    updated_at: str = "2026-06-06"  # Actualizar al modificar los niveles
+
     levels: dict = field(default_factory=lambda: {
         "BTCUSDT": {
-            # Updated Jun 2 — BTC at ~$67,548 (sharp drop from $74,600; all May supports broken)
-            # stop_level set to $56,000 so 5% pct_stop always wins for entries above $58,947
+            # Updated Jun 6 — BTC en ~$60,500 (crash desde $80K; todos los soportes anteriores rotos)
+            # stop_level debe quedar al menos 8% por debajo de la entrada esperada.
+            # Con BTC en $60K y entradas en $58-62K → stop $53K = aprox -8.6% del entry.
             "supports": [
-                {"price": 67000, "label": "Current floor / range low",      "score_bonus": 1},
-                {"price": 64000, "label": "Prior demand zone",              "score_bonus": 2},
-                {"price": 60000, "label": "Major structural support",       "score_bonus": 3},
-                {"price": 56000, "label": "Deep accumulation zone",         "score_bonus": 3},
+                {"price": 58000, "label": "Piso actual / soporte reciente",    "score_bonus": 1},
+                {"price": 55000, "label": "Zona de acumulación previa",        "score_bonus": 2},
+                {"price": 52000, "label": "Soporte estructural fuerte",        "score_bonus": 3},
+                {"price": 48000, "label": "Acumulacion profunda / ATH-2021",   "score_bonus": 3},
             ],
             "resistances": [
-                {"price": 69000, "label": "Broken support → resistance",   "score_bonus": 1},
-                {"price": 71000, "label": "Prior consolidation zone",      "score_bonus": 2},
-                {"price": 74000, "label": "Prior range high",              "score_bonus": 2},
+                {"price": 63000, "label": "Soporte roto -> resistencia",       "score_bonus": 1},
+                {"price": 66000, "label": "Zona de consolidacion previa",      "score_bonus": 2},
+                {"price": 69000, "label": "Resistencia clave 2024",            "score_bonus": 2},
             ],
-            "stop_level": 56000,
+            "stop_level": 53000,
         },
         "ETHUSDT": {
-            # Updated Jun 2 — ETH at ~$1,905 (at $1,900 support; $2,000 and above broken)
-            # stop_level set to $1,600 so 5% pct_stop always wins for entries above $1,684
+            # Updated Jun 6 — ETH en ~$1,554 (crash desde $2,600; $2K, $1,800 y $1,650 rotos)
+            # stop_level debe quedar al menos 8% por debajo de la entrada esperada.
+            # Con ETH en $1,550 y entradas en $1,450-1,550 → stop $1,350 = aprox -8.7%.
             "supports": [
-                {"price": 1900, "label": "Current floor / structural support", "score_bonus": 2},
-                {"price": 1800, "label": "Key accumulation zone",              "score_bonus": 2},
-                {"price": 1650, "label": "Deep structural support",            "score_bonus": 3},
-                {"price": 1450, "label": "Major accumulation zone",            "score_bonus": 3},
+                {"price": 1500, "label": "Soporte psicologico / piso actual",  "score_bonus": 2},
+                {"price": 1400, "label": "Zona de acumulacion 2023",           "score_bonus": 2},
+                {"price": 1250, "label": "Soporte estructural fuerte",         "score_bonus": 3},
+                {"price": 1100, "label": "Acumulacion profunda",               "score_bonus": 3},
             ],
             "resistances": [
-                {"price": 2000, "label": "Broken support → resistance",    "score_bonus": 1},
-                {"price": 2100, "label": "Prior consolidation zone",       "score_bonus": 2},
-                {"price": 2250, "label": "Prior range high",               "score_bonus": 2},
+                {"price": 1650, "label": "Soporte roto -> resistencia",        "score_bonus": 1},
+                {"price": 1780, "label": "Zona de consolidacion previa",       "score_bonus": 2},
+                {"price": 1900, "label": "Resistencia mayor",                  "score_bonus": 2},
             ],
-            "stop_level": 1600,
+            "stop_level": 1350,
         },
     })
     tolerance_pct: float = 0.008  # 0.8% proximity threshold (was 0.5%)
@@ -248,6 +284,7 @@ class Config:
     indicators: IndicatorConfig = field(default_factory=IndicatorConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
+    crash_detector: CrashDetectorConfig = field(default_factory=CrashDetectorConfig)
     key_levels: KeyLevelsConfig = field(default_factory=KeyLevelsConfig)
     reporting: ReportingConfig = field(default_factory=ReportingConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)

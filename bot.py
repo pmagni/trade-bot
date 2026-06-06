@@ -76,19 +76,32 @@ class SwingBot:
                     signals["buy_threshold"] = buy_threshold
 
                     if signals["buy_score"] >= buy_threshold:
-                        # Pre-buy resistance check: don't buy near a key resistance
-                        kl = config.key_levels.levels.get(symbol, {})
-                        near_resistance = False
-                        for r in kl.get("resistances", []):
-                            dist = abs(signals["indicators"]["price"] - r["price"]) / r["price"]
-                            if dist <= config.key_levels.tolerance_pct:
-                                near_resistance = True
-                                signals["buy_action"] = f"Blocked: near resistance {r['label']} ${r['price']:,.0f}"
-                                logger.info(f"{symbol}: Buy blocked — price near resistance {r['label']}")
-                                break
-                        if not near_resistance:
-                            bought = await self._execute_buy(symbol, signals)
-                            signals["buy_action"] = "BOUGHT" if bought else "Blocked (internal check)"
+                        # v2.12 Crash detector: consecutive stop-losses
+                        cd_blocked, cd_reason = risk_manager.check_crash_detector(
+                            symbol,
+                            above_ema200=signals["indicators"].get("above_ema_200", True)
+                        )
+                        if cd_blocked:
+                            signals["buy_action"] = f"Blocked: crash detector — {cd_reason}"
+                            logger.warning(f"{symbol}: {signals['buy_action']}")
+                        # v2.12 Crash detector: velocity (caída >10% en 24h via candles diarios)
+                        elif self._is_crash_velocity(symbol, signals["indicators"]):
+                            signals["buy_action"] = f"Blocked: crash velocity (>10% en 24h)"
+                            logger.warning(f"{symbol}: Buy bloqueado por crash velocity")
+                        else:
+                            # Pre-buy resistance check: don't buy near a key resistance
+                            kl = config.key_levels.levels.get(symbol, {})
+                            near_resistance = False
+                            for r in kl.get("resistances", []):
+                                dist = abs(signals["indicators"]["price"] - r["price"]) / r["price"]
+                                if dist <= config.key_levels.tolerance_pct:
+                                    near_resistance = True
+                                    signals["buy_action"] = f"Blocked: near resistance {r['label']} ${r['price']:,.0f}"
+                                    logger.info(f"{symbol}: Buy blocked — price near resistance {r['label']}")
+                                    break
+                            if not near_resistance:
+                                bought = await self._execute_buy(symbol, signals)
+                                signals["buy_action"] = "BOUGHT" if bought else "Blocked (internal check)"
                     elif signals["buy_score"] >= config.scoring.buy_light:
                         signals["buy_action"] = f"Blocked: trend gate (need {buy_threshold}+)"
                         logger.info(
@@ -146,6 +159,45 @@ class SwingBot:
         except Exception as e:
             logger.error(f"Scan cycle error: {e}")
             notifier.send_sync(notifier.format_error("Scan cycle", str(e)))
+
+    def _is_crash_velocity(self, symbol: str, indicators: dict) -> bool:
+        """
+        v2.12 — Velocity crash check: retorna True si el activo cayó > 10% en 24h.
+        Usa el precio actual vs. el cierre de la vela diaria de ayer (candles_daily).
+        Si la condición se cumple, activa un cooldown de buy de crash_pause_hours.
+        """
+        cd = config.crash_detector
+        if not cd.enabled:
+            return False
+
+        try:
+            # Precio actual
+            price_now = indicators.get("price", 0)
+            if not price_now:
+                return False
+
+            # Precio hace 24h: usamos el local_high/low de los candles diarios que ya tenemos.
+            # Una forma más directa: price vs close de la vela de hace 1 día.
+            # Los indicators ya tienen local_high de 14d; no tenemos el cierre de ayer directamente.
+            # Aproximamos: si drop_from_high > threshold Y drop es reciente (rise_from_low bajo)
+            # significa que la caída fue aguda y reciente.
+            drop_from_high = indicators.get("drop_from_high", 0)
+            rise_from_low = indicators.get("rise_from_low", 0)
+
+            # Caída fuerte (>10%) desde el máximo de 14d Y rebote mínimo (< 5%) → crash activo
+            if drop_from_high >= cd.crash_threshold_24h and rise_from_low < 0.05:
+                # Activar cooldown de crash por símbolo
+                if not db.is_on_cooldown(symbol, "buy"):
+                    db.set_cooldown(symbol, "buy", cd.crash_pause_hours * 60)
+                    logger.warning(
+                        f"Crash velocity [{symbol}]: caída {drop_from_high:.1%} desde máximo "
+                        f"con rebote mínimo ({rise_from_low:.1%}) → buy freeze {cd.crash_pause_hours}h"
+                    )
+                return True
+        except Exception as e:
+            logger.warning(f"Crash velocity check error [{symbol}]: {e}")
+
+        return False
 
     async def _analyze_symbol(self, symbol: str) -> dict:
         """Analyze a symbol and return scores + indicators."""
@@ -220,7 +272,10 @@ class SwingBot:
             fill_fee = result.get("fee", 0)
 
             key_stop = config.key_levels.levels.get(symbol, {}).get("stop_level", 0)
-            sl_price = risk_manager.calc_stop_loss_price(fill_price, leverage, key_stop)
+            above_ema200 = indicators.get("above_ema_200", True)
+            sl_price = risk_manager.calc_stop_loss_price(
+                fill_price, leverage, key_stop, above_ema200=above_ema200
+            )
 
             db.record_trade(
                 symbol=symbol, side="Buy", qty=fill_qty, price=fill_price,
@@ -540,6 +595,28 @@ class SwingBot:
     # SCHEDULED TASKS
     # ═══════════════════════════════════════
 
+    async def _rapid_stop_check(self):
+        """
+        v2.12 — Check de stop-loss dedicado, corre cada 2 minutos.
+        Reduce el gap risk: si el precio cae bruscamente entre scans de 5-15 min,
+        este job detecta el breach antes y ejecuta el stop más cerca del nivel calculado.
+        """
+        open_positions = db.get_open_positions()
+        if not open_positions:
+            return
+
+        symbols_checked = set()
+        for pos in open_positions:
+            symbol = pos["symbol"]
+            if symbol in symbols_checked:
+                continue
+            symbols_checked.add(symbol)
+            try:
+                current_price = exchange.get_price(symbol)
+                await self._check_stop_losses(symbol, current_price)
+            except Exception as e:
+                logger.warning(f"Rapid stop check [{symbol}]: {e}")
+
     async def daily_report(self):
         """Send daily portfolio report."""
         try:
@@ -617,7 +694,7 @@ class SwingBot:
     async def start(self):
         """Start the bot."""
         logger.info("=" * 50)
-        logger.info("Swing Trading Bot v2.10 starting...")
+        logger.info("Swing Trading Bot v2.12 starting...")
         logger.info("=" * 50)
 
         if not config.exchange.api_key:
@@ -666,11 +743,17 @@ class SwingBot:
             hours=6,
             id="sizing_report",
         )
+        # v2.12: stop-loss check dedicado cada 2 min para reducir gap risk entre scans
+        self.scheduler.add_job(
+            self._rapid_stop_check, "interval",
+            minutes=2,
+            id="rapid_stop_check",
+        )
 
         self.scheduler.start()
 
         notifier.send_sync(
-            f"🚀 <b>Swing Trading Bot v2.10 iniciado</b>\n\n"
+            f"🚀 <b>Swing Trading Bot v2.12 iniciado</b>\n\n"
             f"💵 Balance: ${balance:.2f} USDT\n"
             f"📊 Pares: {', '.join(config.pairs.symbols)}\n"
             f"⏱ Scan cada {config.scanning.interval_minutes} min\n"

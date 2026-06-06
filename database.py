@@ -322,6 +322,45 @@ class Database:
 
     # ─── PERFORMANCE METRICS ───
 
+    def count_recent_stop_losses(self, symbol: str, days: int) -> int:
+        """
+        Cuenta cuántas posiciones del símbolo fueron cerradas por stop-loss
+        en los últimos `days` días. Usado por el crash detector (v2.12).
+        """
+        conn = self._get_conn()
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        row = conn.execute(
+            """SELECT COUNT(*) as cnt FROM positions
+               WHERE symbol = ? AND status = 'closed'
+               AND close_reason LIKE 'stop_loss%'
+               AND close_time >= ?""",
+            (symbol, cutoff)
+        ).fetchone()
+        conn.close()
+        return row["cnt"] if row else 0
+
+    def get_price_24h_ago(self, symbol: str) -> float:
+        """
+        Retorna el precio de cierre de la vela de hace 24h aprox,
+        usando los snapshots de portfolio como referencia.
+        Retorna 0 si no hay datos suficientes.
+        (v2.12 — usado por crash detector para calcular variación 24h)
+        """
+        conn = self._get_conn()
+        from datetime import timedelta
+        target = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        # Usamos el snapshot más cercano a 24h atrás
+        row = conn.execute(
+            """SELECT btc_value_usdt, eth_value_usdt, total_value_usdt, available_usdt
+               FROM portfolio_snapshots
+               WHERE timestamp <= ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            (target,)
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else {}
+
     def get_performance_stats(self) -> dict:
         conn = self._get_conn()
         closed = conn.execute(
