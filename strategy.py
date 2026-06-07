@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Optional
 from config import config
+from database import db
 
 logger = logging.getLogger("strategy")
 
@@ -208,7 +209,8 @@ class Strategy:
             details["zone"] = f"Price in {indicators['zone']} zone +{zone_score}"
 
         # Key support levels (multi-tier): find best matching support within tolerance
-        kl = config.key_levels.levels.get(symbol, {})
+        # v2.13: prefer dynamic levels (auto-updated daily) over static config
+        kl = db.get_effective_levels(symbol)
         supports = kl.get("supports", [])
         if supports:
             price = indicators["price"]
@@ -331,7 +333,8 @@ class Strategy:
             details["trend"] = "Below EMA200 (downtrend) +1"
 
         # Key resistance levels (multi-tier): find best matching resistance
-        kl = config.key_levels.levels.get(symbol, {})
+        # v2.13: prefer dynamic levels (auto-updated daily) over static config
+        kl = db.get_effective_levels(symbol)
         resistances = kl.get("resistances", [])
         if resistances:
             price = indicators["price"]
@@ -347,7 +350,7 @@ class Strategy:
                 score += best_bonus
                 details["key_resistance"] = best_label
 
-        # Key support break: price broke below a support level
+        # Key support break: price broke below a support level (kl already loaded above)
         supports = kl.get("supports", [])
         if supports:
             price = indicators["price"]

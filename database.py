@@ -361,6 +361,46 @@ class Database:
         conn.close()
         return dict(row) if row else {}
 
+    # ─── DYNAMIC LEVELS (v2.13) ───
+
+    def save_dynamic_levels(self, symbol: str, levels: dict):
+        """
+        Persist auto-detected key levels to bot_state as JSON.
+        Key: f"dynamic_levels_{symbol}"  (e.g. "dynamic_levels_BTCUSDT")
+        Written by the daily params_updater job; read by strategy and bot on every scan.
+        """
+        self.set_state(f"dynamic_levels_{symbol}", json.dumps(levels))
+
+    def get_dynamic_levels(self, symbol: str) -> dict:
+        """
+        Load auto-detected key levels from bot_state.
+        Returns {} if no update has run yet (first start, or DB wiped).
+        """
+        raw = self.get_state(f"dynamic_levels_{symbol}", "")
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {}
+
+    def get_effective_levels(self, symbol: str) -> dict:
+        """
+        Single source of truth for key levels used by strategy and bot.
+
+        Priority:
+          1. Dynamic levels (auto-detected from candles, saved by params_updater)
+          2. Static config levels (fallback — always available)
+
+        Centralizing level resolution here ensures bot.py and strategy.py
+        never diverge on which levels they use for the same symbol.
+        """
+        from config import config   # local import avoids any circular-import risk
+        dynamic = self.get_dynamic_levels(symbol)
+        if dynamic and dynamic.get("supports"):
+            return dynamic
+        return config.key_levels.levels.get(symbol, {})
+
     def get_performance_stats(self) -> dict:
         conn = self._get_conn()
         closed = conn.execute(

@@ -90,7 +90,8 @@ class SwingBot:
                             logger.warning(f"{symbol}: Buy bloqueado por crash velocity")
                         else:
                             # Pre-buy resistance check: don't buy near a key resistance
-                            kl = config.key_levels.levels.get(symbol, {})
+                            # v2.13: use dynamic levels (auto-updated daily) if available
+                            kl = db.get_effective_levels(symbol)
                             near_resistance = False
                             for r in kl.get("resistances", []):
                                 dist = abs(signals["indicators"]["price"] - r["price"]) / r["price"]
@@ -271,7 +272,8 @@ class SwingBot:
             fill_value = result.get("value_usdt", amount)
             fill_fee = result.get("fee", 0)
 
-            key_stop = config.key_levels.levels.get(symbol, {}).get("stop_level", 0)
+            # v2.13: use dynamic stop_level if available from daily params update
+            key_stop = db.get_effective_levels(symbol).get("stop_level", 0)
             above_ema200 = indicators.get("above_ema_200", True)
             sl_price = risk_manager.calc_stop_loss_price(
                 fill_price, leverage, key_stop, above_ema200=above_ema200
@@ -617,6 +619,92 @@ class SwingBot:
             except Exception as e:
                 logger.warning(f"Rapid stop check [{symbol}]: {e}")
 
+    # ═══════════════════════════════════════
+    # DAILY PARAMS UPDATE (v2.13)
+    # ═══════════════════════════════════════
+
+    async def _daily_params_update(self):
+        """
+        v2.13 — Daily parameter update job (runs at 00:05 UTC).
+
+        Refreshes key support/resistance levels for each trading pair using:
+          - Swing high/low detection on the last 30 daily candles
+          - Volume-weighted clustering (1.8% tolerance)
+          - ATR-14d-based dynamic stop percentage
+
+        Results are saved to the database (bot_state JSON).
+        Strategy and bot read from DB first, falling back to static config if needed.
+        A Telegram summary is sent so the user can see what changed.
+        """
+        try:
+            from params_updater import detect_key_levels, calc_atr_stop_pct
+        except ImportError as e:
+            logger.error(f"Daily params update: cannot import params_updater — {e}")
+            return
+
+        logger.info("─── Daily params update starting ───")
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        report_lines = [f"⚙️ <b>Parámetros actualizados</b> — {now_str}\n"]
+
+        for symbol in config.pairs.symbols:
+            try:
+                candles_daily = exchange.get_ohlcv(symbol, interval="D", limit=60)
+                current_price = exchange.get_price(symbol)
+
+                # Detect swing-based key levels
+                new_levels = detect_key_levels(symbol, candles_daily, current_price)
+                if not new_levels:
+                    logger.warning(f"Params update [{symbol}]: no levels detected, keeping previous")
+                    report_lines.append(f"⚠️ <b>{symbol}</b>: sin niveles detectados — se mantienen los anteriores\n")
+                    continue
+
+                # ATR-based dynamic stop percentage
+                dyn_stop_pct = calc_atr_stop_pct(candles_daily, current_price)
+                new_levels["dynamic_stop_pct"] = dyn_stop_pct
+
+                # Persist to DB
+                db.save_dynamic_levels(symbol, new_levels)
+
+                # ── Build Telegram report ──
+                sup_prices = [s["price"] for s in new_levels.get("supports", [])]
+                res_prices = [r["price"] for r in new_levels.get("resistances", [])]
+                sup_str = "  ".join(f"${p:,.0f}" for p in sup_prices) or "—"
+                res_str = "  ".join(f"${p:,.0f}" for p in res_prices) or "—"
+
+                # Compare with previous dynamic levels to flag changes
+                prev = db.get_dynamic_levels(symbol)  # already updated, so compare before save
+                prev_stop = prev.get("stop_level", 0) if prev else 0
+                stop_changed = "🔄" if prev_stop and prev_stop != new_levels["stop_level"] else "✅"
+
+                report_lines.append(
+                    f"<b>{symbol}</b> @ ${current_price:,.2f}\n"
+                    f"  📍 Soportes: {sup_str}\n"
+                    f"  🚧 Resistencias: {res_str}\n"
+                    f"  {stop_changed} Stop level: ${new_levels['stop_level']:,.0f} | "
+                    f"Stop dinámico: {dyn_stop_pct:.1%}\n"
+                )
+
+                logger.info(
+                    f"Params updated [{symbol}]: "
+                    f"{len(sup_prices)} soportes {sup_prices}, "
+                    f"{len(res_prices)} resistencias {res_prices}, "
+                    f"stop_level={new_levels['stop_level']:,.0f}, "
+                    f"dyn_stop={dyn_stop_pct:.1%}"
+                )
+
+            except Exception as e:
+                logger.error(f"Params update [{symbol}]: {e}")
+                report_lines.append(f"⚠️ <b>{symbol}</b>: error — {e}\n")
+
+        report_lines.append(
+            "\n<i>📊 Datos: últimos 30 candles diarios\n"
+            "⚡ Algoritmo: swing highs/lows + clustering por volumen\n"
+            "🔁 Próxima actualización: mañana 00:05 UTC</i>"
+        )
+
+        notifier.send_sync("\n".join(report_lines))
+        logger.info("─── Daily params update complete ───")
+
     async def daily_report(self):
         """Send daily portfolio report."""
         try:
@@ -694,7 +782,7 @@ class SwingBot:
     async def start(self):
         """Start the bot."""
         logger.info("=" * 50)
-        logger.info("Swing Trading Bot v2.12 starting...")
+        logger.info("Swing Trading Bot v2.13 starting...")
         logger.info("=" * 50)
 
         if not config.exchange.api_key:
@@ -749,11 +837,17 @@ class SwingBot:
             minutes=2,
             id="rapid_stop_check",
         )
+        # v2.13: actualización diaria de parámetros (key levels + ATR stop) a las 00:05 UTC
+        self.scheduler.add_job(
+            self._daily_params_update, "cron",
+            hour=0, minute=5,
+            id="daily_params_update",
+        )
 
         self.scheduler.start()
 
         notifier.send_sync(
-            f"🚀 <b>Swing Trading Bot v2.12 iniciado</b>\n\n"
+            f"🚀 <b>Swing Trading Bot v2.13 iniciado</b>\n\n"
             f"💵 Balance: ${balance:.2f} USDT\n"
             f"📊 Pares: {', '.join(config.pairs.symbols)}\n"
             f"⏱ Scan cada {config.scanning.interval_minutes} min\n"
@@ -762,6 +856,8 @@ class SwingBot:
             f"Comandos: /status /portfolio /signals /history /performance /zones /pause /resume /config /force_sell /report /sizing"
         )
 
+        # v2.13: update key levels on startup so first scan uses fresh data
+        await self._daily_params_update()
         # Run initial sizing report then scan
         await self.send_sizing_report()
         await self.scan_cycle()
