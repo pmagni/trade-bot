@@ -139,8 +139,9 @@ class Strategy:
         details = {}
 
         # Overbought guard: don't buy into overbought territory
+        # v2.13.1: RSI>70 alone is sufficient — no need to also pierce upper BB
         rsi = indicators["rsi"]
-        if rsi > IC.rsi_overbought and indicators["price"] > indicators["bb_upper"]:
+        if rsi > IC.rsi_overbought:
             details["overbought_guard"] = (
                 f"BLOCKED: RSI {rsi:.1f} > {IC.rsi_overbought} & above upper BB"
             )
