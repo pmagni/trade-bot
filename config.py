@@ -29,8 +29,14 @@ class TelegramConfig:
 @dataclass
 class TradingPairs:
     """Trading pair configuration."""
-    symbols: list = field(default_factory=lambda: ["BTCUSDT", "ETHUSDT"])
-    base_assets: list = field(default_factory=lambda: ["BTC", "ETH"])
+    symbols: list = field(default_factory=lambda: [
+        "BTCUSDT", "ETHUSDT",
+        "SOLUSDT", "XRPUSDT", "BNBUSDT",
+    ])
+    base_assets: list = field(default_factory=lambda: [
+        "BTC", "ETH",
+        "SOL", "XRP", "BNB",
+    ])
     quote_asset: str = "USDT"
 
 
@@ -218,7 +224,7 @@ class KeyLevelsConfig:
     IMPORTANTE: actualizar al cambiar de régimen. El bot loguea WARNING si > 7 días sin cambio.
     updated_at se usa solo para tracking — no tiene efecto en la lógica.
     """
-    updated_at: str = "2026-06-06"  # Actualizar al modificar los niveles
+    updated_at: str = "2026-06-13"  # Actualizar al modificar los niveles
 
     levels: dict = field(default_factory=lambda: {
         "BTCUSDT": {
@@ -254,6 +260,57 @@ class KeyLevelsConfig:
                 {"price": 1900, "label": "Resistencia mayor",                  "score_bonus": 2},
             ],
             "stop_level": 1350,
+        },
+        "SOLUSDT": {
+            # Added Jun 13 — SOL en ~$69 (ATH $294 Jan-2025; recuperando desde $61)
+            # Comunidad acumulando $66-67, resistencia clave en $70.
+            # stop_level: $60 = aprox -13% desde zona de entrada $66-69.
+            "supports": [
+                {"price": 67,  "label": "Zona de acumulacion reciente",       "score_bonus": 1},
+                {"price": 63,  "label": "Soporte previo / piso ultimo rally",  "score_bonus": 2},
+                {"price": 58,  "label": "Zona de consolidacion fuerte",        "score_bonus": 2},
+                {"price": 50,  "label": "Soporte estructural / nivel clave",   "score_bonus": 3},
+            ],
+            "resistances": [
+                {"price": 70,  "label": "Resistencia psicologica clave",       "score_bonus": 1},
+                {"price": 76,  "label": "Techo del wedge bajista / objetivo",  "score_bonus": 2},
+                {"price": 85,  "label": "Zona de resistencia mayor",           "score_bonus": 2},
+            ],
+            "stop_level": 60,
+        },
+        "XRPUSDT": {
+            # Added Jun 13 — XRP en ~$1.15 (86% comunidad bullish; claridad regulatoria)
+            # Recuperacion desde minimos; soporte en $1.05-1.10.
+            # stop_level: $0.97 = aprox -15% desde zona de entrada $1.10-1.15.
+            "supports": [
+                {"price": 1.10, "label": "Soporte inmediato / consolidacion", "score_bonus": 1},
+                {"price": 1.00, "label": "Soporte psicologico fuerte",        "score_bonus": 2},
+                {"price": 0.90, "label": "Zona de acumulacion 2024",          "score_bonus": 2},
+                {"price": 0.75, "label": "Soporte estructural profundo",       "score_bonus": 3},
+            ],
+            "resistances": [
+                {"price": 1.20, "label": "Resistencia inmediata",             "score_bonus": 1},
+                {"price": 1.35, "label": "Zona de resistencia media",         "score_bonus": 2},
+                {"price": 1.55, "label": "Resistencia historica 2024",        "score_bonus": 2},
+            ],
+            "stop_level": 0.97,
+        },
+        "BNBUSDT": {
+            # Added Jun 13 — BNB en ~$609 (exchange token con utilidad propia)
+            # Rendimiento estable +6% 7d; menos volatil que otros altcoins.
+            # stop_level: $555 = aprox -9% desde zona de entrada $580-610.
+            "supports": [
+                {"price": 590, "label": "Soporte de corto plazo",             "score_bonus": 1},
+                {"price": 560, "label": "Zona de acumulacion reciente",       "score_bonus": 2},
+                {"price": 520, "label": "Soporte estructural 2024",           "score_bonus": 2},
+                {"price": 480, "label": "Zona de acumulacion profunda",       "score_bonus": 3},
+            ],
+            "resistances": [
+                {"price": 625, "label": "Resistencia inmediata",              "score_bonus": 1},
+                {"price": 650, "label": "Zona de resistencia media",          "score_bonus": 2},
+                {"price": 700, "label": "Resistencia historica / ATH zone",   "score_bonus": 2},
+            ],
+            "stop_level": 555,
         },
     })
     tolerance_pct: float = 0.008  # 0.8% proximity threshold (was 0.5%)
