@@ -224,59 +224,59 @@ class KeyLevelsConfig:
     IMPORTANTE: actualizar al cambiar de régimen. El bot loguea WARNING si > 7 días sin cambio.
     updated_at se usa solo para tracking — no tiene efecto en la lógica.
     """
-    updated_at: str = "2026-06-13"  # Actualizar al modificar los niveles
+    updated_at: str = "2026-06-15"  # Actualizar al modificar los niveles
 
     levels: dict = field(default_factory=lambda: {
         "BTCUSDT": {
-            # Updated Jun 6 — BTC en ~$60,500 (crash desde $80K; todos los soportes anteriores rotos)
-            # stop_level debe quedar al menos 8% por debajo de la entrada esperada.
-            # Con BTC en $60K y entradas en $58-62K → stop $53K = aprox -8.6% del entry.
+            # Updated Jun 15 — BTC en ~$66,700 (rally desde $60.5K; RSI 78 overbought)
+            # Rally activo: esperar pullback a $63-64K para comprar.
+            # stop_level: $60K = aprox -8% desde zona de entrada $63-65K.
             "supports": [
-                {"price": 58000, "label": "Piso actual / soporte reciente",    "score_bonus": 1},
-                {"price": 55000, "label": "Zona de acumulación previa",        "score_bonus": 2},
-                {"price": 52000, "label": "Soporte estructural fuerte",        "score_bonus": 3},
-                {"price": 48000, "label": "Acumulacion profunda / ATH-2021",   "score_bonus": 3},
+                {"price": 63000, "label": "Zona de consolidacion / primer soporte", "score_bonus": 1},
+                {"price": 60000, "label": "Soporte psicologico fuerte",             "score_bonus": 2},
+                {"price": 57000, "label": "Zona de acumulacion previa",             "score_bonus": 3},
+                {"price": 53000, "label": "Soporte estructural profundo",           "score_bonus": 3},
             ],
             "resistances": [
-                {"price": 63000, "label": "Soporte roto -> resistencia",       "score_bonus": 1},
-                {"price": 66000, "label": "Zona de consolidacion previa",      "score_bonus": 2},
-                {"price": 69000, "label": "Resistencia clave 2024",            "score_bonus": 2},
+                {"price": 67000, "label": "Resistencia inmediata (zona actual)",    "score_bonus": 1},
+                {"price": 69000, "label": "Resistencia clave 2024",                "score_bonus": 2},
+                {"price": 73000, "label": "Resistencia historica pre-ATH",         "score_bonus": 2},
             ],
-            "stop_level": 53000,
+            "stop_level": 59000,
         },
         "ETHUSDT": {
-            # Updated Jun 6 — ETH en ~$1,554 (crash desde $2,600; $2K, $1,800 y $1,650 rotos)
-            # stop_level debe quedar al menos 8% por debajo de la entrada esperada.
-            # Con ETH en $1,550 y entradas en $1,450-1,550 → stop $1,350 = aprox -8.7%.
+            # Updated Jun 15 — ETH en ~$1,816 (rally desde $1,550; RSI 84 extreme overbought)
+            # Rompió $1,780 resistencia → ahora soporte. Esperar pullback a $1,700-1,750.
+            # stop_level: $1,580 = aprox -8.5% desde zona de entrada $1,700-1,750.
             "supports": [
-                {"price": 1500, "label": "Soporte psicologico / piso actual",  "score_bonus": 2},
-                {"price": 1400, "label": "Zona de acumulacion 2023",           "score_bonus": 2},
-                {"price": 1250, "label": "Soporte estructural fuerte",         "score_bonus": 3},
-                {"price": 1100, "label": "Acumulacion profunda",               "score_bonus": 3},
+                {"price": 1780, "label": "Resistencia rota → nuevo soporte",       "score_bonus": 1},
+                {"price": 1700, "label": "Zona de consolidacion / pullback ideal",  "score_bonus": 2},
+                {"price": 1600, "label": "Soporte fuerte / previo piso",            "score_bonus": 3},
+                {"price": 1450, "label": "Soporte estructural profundo",            "score_bonus": 3},
             ],
             "resistances": [
-                {"price": 1650, "label": "Soporte roto -> resistencia",        "score_bonus": 1},
-                {"price": 1780, "label": "Zona de consolidacion previa",       "score_bonus": 2},
-                {"price": 1900, "label": "Resistencia mayor",                  "score_bonus": 2},
+                {"price": 1830, "label": "Resistencia inmediata (zona actual)",    "score_bonus": 1},
+                {"price": 1900, "label": "Resistencia mayor",                      "score_bonus": 2},
+                {"price": 2000, "label": "Resistencia psicologica clave",          "score_bonus": 2},
             ],
-            "stop_level": 1350,
+            "stop_level": 1580,
         },
         "SOLUSDT": {
-            # Added Jun 13 — SOL en ~$69 (ATH $294 Jan-2025; recuperando desde $61)
-            # Comunidad acumulando $66-67, resistencia clave en $70.
-            # stop_level: $60 = aprox -13% desde zona de entrada $66-69.
+            # Updated Jun 15 — SOL en ~$78 (rally +13% desde $69; puede estar overbought)
+            # Esperar pullback a zona $70-72 para entrar. Resistencia en $80-85.
+            # stop_level: $65 = aprox -10% desde zona de entrada $70-72.
             "supports": [
-                {"price": 67,  "label": "Zona de acumulacion reciente",       "score_bonus": 1},
-                {"price": 63,  "label": "Soporte previo / piso ultimo rally",  "score_bonus": 2},
-                {"price": 58,  "label": "Zona de consolidacion fuerte",        "score_bonus": 2},
-                {"price": 50,  "label": "Soporte estructural / nivel clave",   "score_bonus": 3},
+                {"price": 74,  "label": "Soporte de corto plazo / pullback zone", "score_bonus": 1},
+                {"price": 70,  "label": "Resistencia rota → soporte clave",       "score_bonus": 2},
+                {"price": 65,  "label": "Zona de acumulacion previa",             "score_bonus": 2},
+                {"price": 58,  "label": "Soporte estructural fuerte",             "score_bonus": 3},
             ],
             "resistances": [
-                {"price": 70,  "label": "Resistencia psicologica clave",       "score_bonus": 1},
-                {"price": 76,  "label": "Techo del wedge bajista / objetivo",  "score_bonus": 2},
-                {"price": 85,  "label": "Zona de resistencia mayor",           "score_bonus": 2},
+                {"price": 80,  "label": "Resistencia psicologica",               "score_bonus": 1},
+                {"price": 85,  "label": "Zona de resistencia mayor",             "score_bonus": 2},
+                {"price": 95,  "label": "Resistencia historica",                 "score_bonus": 2},
             ],
-            "stop_level": 60,
+            "stop_level": 65,
         },
         "XRPUSDT": {
             # Added Jun 13 — XRP en ~$1.15 (86% comunidad bullish; claridad regulatoria)
