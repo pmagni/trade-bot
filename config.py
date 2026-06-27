@@ -169,7 +169,8 @@ class CrashDetectorConfig:
     # Stop-losses consecutivos: waterfall protection
     consecutive_sl_limit: int = 2         # ≥2 stop-losses en N días → pausa larga
     consecutive_sl_days: int = 5          # Ventana de tiempo para contarlos
-    consecutive_sl_pause_hours: int = 168 # 7 días de pausa tras waterfall detectado
+    consecutive_sl_pause_hours: int = 48  # v2.14: 2 días (era 7). El filtro de régimen ya
+                                          # evita la mayoría de cascadas; 7d apagaba el bot de más.
 
     # Stop-loss más ancho cuando el precio está bajo EMA200 (downtrend)
     # Evita "gapping" — ser forzado a salir muy por debajo del stop calculado
@@ -178,12 +179,32 @@ class CrashDetectorConfig:
 
 
 @dataclass
+class RegimeConfig:
+    """
+    v2.14 — Filtro de régimen. La pieza de mayor impacto según la auditoría jun-2026.
+
+    Backtest (16 meses, BTC+ETH): activar este filtro cortó las pérdidas en bear
+    market ~30-78% sin estrangular las ganancias en bull (win-rate 19%→76%).
+
+    Lógica: NO comprar reversión cuando el activo está en downtrend confirmado
+    (precio < EMA50 4h con pendiente bajista Y bajo EMA200), SALVO que haya una
+    señal genuina de giro (cruce MACD alcista o RSI saliendo de sobreventa).
+    Esto evita "atrapar cuchillos" en caídas verticales como la de junio 2026.
+    """
+    enabled: bool = True
+    ema_mid_period: int = 50            # EMA media (sobre velas 4h) que define el downtrend de corto plazo
+    reversal_override: bool = True      # permitir compra en downtrend si hay señal de giro confirmada
+
+
+@dataclass
 class RiskConfig:
     """Risk management parameters."""
     # Stop-loss
-    stop_loss_pct: float = 0.05         # -5% from entry (uptrend); ×1.6 en downtrend (v2.12)
-    trailing_stop_activation: float = 0.015  # Activate trailing at +1.5% (was 3% — never triggered)
-    trailing_stop_distance: float = 0.02    # 2% below max
+    stop_loss_pct: float = 0.035        # v2.14: -3.5% (era -5%); ×1.6 en downtrend (v2.12)
+    take_profit_pct: float = 0.03       # v2.14: toma de ganancia a +3% (0 = desactivado).
+                                        # Asegura el perfil "ganancias pequeñas recurrentes".
+    trailing_stop_activation: float = 0.015  # Activate trailing at +1.5%
+    trailing_stop_distance: float = 0.008   # v2.14: 0.8% (< activación → realmente asegura la ganancia)
 
     # Position sizing
     max_per_trade_pct: float = 0.40     # Max 40% of available per trade
@@ -195,6 +216,12 @@ class RiskConfig:
     # Portfolio limits
     max_daily_loss_pct: float = 0.05    # -5% daily circuit breaker
     max_drawdown_pct: float = 0.12      # -12% total circuit breaker (era 15% — activaba tarde)
+
+    # v2.14 — Auto-reanudación tras circuit breaker.
+    # ANTES: un drawdown pausaba el bot indefinidamente (quedó 12 días apagado en jun-2026).
+    # AHORA: reanuda solo cuando el drawdown se recupera por debajo del umbral.
+    auto_resume_enabled: bool = True
+    auto_resume_drawdown_pct: float = 0.06   # reanuda cuando drawdown actual <= 6%
 
     # Leverage (optional, disabled by default)
     leverage_enabled: bool = False
@@ -210,7 +237,8 @@ class RiskConfig:
     # Cooldowns (in minutes)
     cooldown_after_buy: int = 30        # 30 minutes
     cooldown_after_sell: int = 30       # 30 minutes
-    cooldown_after_stop_loss: int = 1440  # 24 hours
+    cooldown_after_stop_loss: int = 360   # v2.14: 6h (era 24h). Con stop -3.5% las pérdidas
+                                          # son pequeñas; 24h apagaba el bot tras cada ruido.
     min_hold_minutes: int = 60          # Don't sell within 60 min of buying
     max_trades_per_day_per_asset: int = 2
 
@@ -341,6 +369,7 @@ class Config:
     indicators: IndicatorConfig = field(default_factory=IndicatorConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
+    regime: RegimeConfig = field(default_factory=RegimeConfig)
     crash_detector: CrashDetectorConfig = field(default_factory=CrashDetectorConfig)
     key_levels: KeyLevelsConfig = field(default_factory=KeyLevelsConfig)
     reporting: ReportingConfig = field(default_factory=ReportingConfig)

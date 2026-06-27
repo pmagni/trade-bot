@@ -60,6 +60,14 @@ class Strategy:
         indicators["ema_cross_bullish"] = (diff.iloc[-1] > 0) and (diff.iloc[-2] <= 0)
         indicators["ema_cross_bearish"] = (diff.iloc[-1] < 0) and (diff.iloc[-2] >= 0)
 
+        # EMA media (50 sobre 4h) + pendiente — usada por el filtro de régimen (v2.14)
+        ema_mid_period = config.regime.ema_mid_period
+        ema_mid_series = close.ewm(span=ema_mid_period, adjust=False).mean()
+        indicators["ema_mid"] = ema_mid_series.iloc[-1]
+        indicators["ema_mid_falling"] = (
+            len(ema_mid_series) >= 2 and ema_mid_series.iloc[-1] < ema_mid_series.iloc[-2]
+        )
+
         # EMA 200 (from daily data if available, else approximate from 4h)
         if candles_daily and len(candles_daily) >= IC.ema_trend:
             daily_close = pd.Series([c["close"] for c in candles_daily])
@@ -233,6 +241,42 @@ class Strategy:
                 details["key_support"] = best_label
 
         return score, details
+
+    def regime_allows_buy(self, indicators: dict) -> Tuple[bool, str]:
+        """
+        v2.14 — Filtro de régimen. Decide si se permite una compra de reversión
+        según la tendencia. Devuelve (allowed, reason).
+
+        Bloquea compras en downtrend confirmado (precio < EMA50 4h con pendiente
+        bajista Y bajo EMA200), salvo señal de giro (cruce MACD alcista o RSI
+        saliendo de sobreventa) si reversal_override está activo.
+
+        Es la defensa principal contra "atrapar cuchillos" en caídas verticales.
+        """
+        RG = config.regime
+        if not RG.enabled:
+            return True, "regime filter off"
+
+        price = indicators.get("price", 0)
+        ema_mid = indicators.get("ema_mid", 0)
+        below_ema200 = not indicators.get("above_ema_200", True)
+        downtrend = (
+            ema_mid > 0 and price < ema_mid
+            and indicators.get("ema_mid_falling", False)
+            and below_ema200
+        )
+        if not downtrend:
+            return True, "regime OK"
+
+        if RG.reversal_override:
+            reversal = (
+                indicators.get("macd_bullish_cross")
+                or indicators.get("rsi_rising_from_oversold")
+            )
+            if reversal:
+                return True, "downtrend pero señal de giro confirmada"
+
+        return False, "BLOQUEADO: downtrend confirmado (precio<EMA50 bajista y <EMA200)"
 
     def calc_sell_score(self, indicators: dict, positions: list = None, symbol: str = "") -> Tuple[int, dict]:
         """
@@ -621,8 +665,14 @@ class Strategy:
             pnl_pct = (current_price - entry_price) / entry_price
             return True, f"stop_loss ({pnl_pct:.1%})"
 
-        # Trailing stop
         pnl_pct = (current_price - entry_price) / entry_price
+
+        # v2.14 — Take-profit: asegura la ganancia pequeña antes de que se evapore.
+        tp = config.risk.take_profit_pct
+        if tp > 0 and pnl_pct >= tp:
+            return True, f"take_profit ({pnl_pct:+.1%})"
+
+        # Trailing stop
         if pnl_pct >= config.risk.trailing_stop_activation:
             new_max = max(trailing_max, current_price)
             new_trailing = new_max * (1 - config.risk.trailing_stop_distance)
