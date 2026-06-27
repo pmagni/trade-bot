@@ -142,6 +142,7 @@ Manual support/resistance levels with score bonuses. Each level fires when price
 
 | Version | Change |
 |---------|--------|
+| v2.14 | **Filtro de régimen** (no comprar reversión en downtrend confirmado) + **take-profit +3%** + stop −5%→−3.5% + trailing 2%→0.8% + auto-reanudación tras circuit breaker + cooldowns más cortos. Validado en backtest 16m (ver `docs/AUDITORIA_2026-06-27.md`). |
 | v2.11 | Recalibrated key levels for May 23 regime; BTC stop_level 76K→70K |
 | v2.10 | BTC minimum buy score = 6 (score-5 BTC historically underperforms) |
 | v2.9 | DCA escalation multipliers, spread guard, score gates, opportunity-sized positions |

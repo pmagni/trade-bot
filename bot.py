@@ -50,8 +50,13 @@ class SwingBot:
 
             status = db.get_state("bot_status", "scanning")
             if status == "paused":
-                logger.info("Bot is paused, skipping scan")
-                return
+                # v2.14: auto-reanudar tras circuit breaker cuando el drawdown se recupera.
+                # Evita que un drawdown deje el bot apagado indefinidamente (jun-2026: 12 días off).
+                if self._maybe_auto_resume():
+                    status = "scanning"
+                else:
+                    logger.info("Bot is paused, skipping scan")
+                    return
 
             all_signals = {}
 
@@ -75,7 +80,13 @@ class SwingBot:
                         buy_threshold = max(buy_threshold, config.scoring.btc_min_buy_score)
                     signals["buy_threshold"] = buy_threshold
 
-                    if signals["buy_score"] >= buy_threshold:
+                    # v2.14 Regime filter: no comprar reversión en downtrend confirmado
+                    regime_ok, regime_reason = strategy.regime_allows_buy(signals["indicators"])
+
+                    if signals["buy_score"] >= buy_threshold and not regime_ok:
+                        signals["buy_action"] = f"Blocked: régimen — {regime_reason}"
+                        logger.info(f"{symbol}: Buy bloqueado por filtro de régimen — {regime_reason}")
+                    elif signals["buy_score"] >= buy_threshold:
                         # v2.12 Crash detector: consecutive stop-losses
                         cd_blocked, cd_reason = risk_manager.check_crash_detector(
                             symbol,
@@ -160,6 +171,41 @@ class SwingBot:
         except Exception as e:
             logger.error(f"Scan cycle error: {e}")
             notifier.send_sync(notifier.format_error("Scan cycle", str(e)))
+
+    def _maybe_auto_resume(self) -> bool:
+        """
+        v2.14 — Reanuda el bot tras un circuit breaker por drawdown cuando el
+        portfolio se recupera por debajo de auto_resume_drawdown_pct.
+        Solo aplica si el pause fue por drawdown (no a pausas manuales del usuario).
+        Devuelve True si reanudó.
+        """
+        RC = config.risk
+        if not RC.auto_resume_enabled:
+            return False
+
+        pause_reason = db.get_state("pause_reason", "") or ""
+        if "drawdown" not in pause_reason.lower():
+            return False  # pausa manual u otra causa → no auto-reanudar
+
+        try:
+            total = portfolio.get_total_value()["total_usdt"]
+            peak = db.get_peak_value()
+            if peak <= 0:
+                return False
+            drawdown = (peak - total) / peak
+            if drawdown <= RC.auto_resume_drawdown_pct:
+                db.set_state("bot_status", "scanning")
+                db.set_state("pause_reason", "")
+                msg = (
+                    f"▶️ <b>Bot reanudado automáticamente</b>\n"
+                    f"Drawdown recuperado a {drawdown:.1%} (≤ {RC.auto_resume_drawdown_pct:.0%})"
+                )
+                notifier.send_sync(msg)
+                logger.info(f"Auto-resume: drawdown {drawdown:.1%} <= {RC.auto_resume_drawdown_pct:.0%}")
+                return True
+        except Exception as e:
+            logger.warning(f"Auto-resume check error: {e}")
+        return False
 
     def _is_crash_velocity(self, symbol: str, indicators: dict) -> bool:
         """
@@ -455,24 +501,36 @@ class SwingBot:
                     pnl_pct = (current_price - pos["entry_price"]) / pos["entry_price"]
 
                     db.close_position(pos["id"], current_price, pnl_usdt, pnl_pct, reason)
+
+                    is_take_profit = reason.startswith("take_profit")
                     db.record_trade(
                         symbol=symbol, side="Sell", qty=pos["qty"],
                         price=current_price,
                         value_usdt=current_price * pos["qty"],
-                        notes=f"stop_loss: {reason}",
+                        notes=reason if is_take_profit else f"stop_loss: {reason}",
                     )
 
-                    risk_manager.set_stop_loss_cooldown(symbol)
-
-                    alert = notifier.format_stop_loss_alert(
-                        symbol, pos["entry_price"], current_price,
-                        pnl_usdt, pnl_pct, reason
-                    )
-                    notifier.send_sync(alert)
-
-                    logger.warning(
-                        f"STOP-LOSS {symbol}: ${pnl_usdt:+.2f} ({pnl_pct:+.1%}) - {reason}"
-                    )
+                    # v2.14: un take-profit es una venta normal (cooldown corto),
+                    # no debe disparar el cooldown largo de stop-loss.
+                    if is_take_profit:
+                        risk_manager.set_sell_cooldown(symbol)
+                        notifier.send_sync(notifier.format_sell_alert(
+                            symbol, current_price, pos["qty"],
+                            current_price * pos["qty"], 0,
+                            {"take_profit": reason}, pnl_usdt, pnl_pct
+                        ))
+                        logger.info(
+                            f"TAKE-PROFIT {symbol}: ${pnl_usdt:+.2f} ({pnl_pct:+.1%}) - {reason}"
+                        )
+                    else:
+                        risk_manager.set_stop_loss_cooldown(symbol)
+                        notifier.send_sync(notifier.format_stop_loss_alert(
+                            symbol, pos["entry_price"], current_price,
+                            pnl_usdt, pnl_pct, reason
+                        ))
+                        logger.warning(
+                            f"STOP-LOSS {symbol}: ${pnl_usdt:+.2f} ({pnl_pct:+.1%}) - {reason}"
+                        )
 
                 except Exception as e:
                     logger.error(f"Stop-loss execution error for {symbol}: {e}")
