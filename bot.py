@@ -840,7 +840,7 @@ class SwingBot:
     async def start(self):
         """Start the bot."""
         logger.info("=" * 50)
-        logger.info("Swing Trading Bot v2.13 starting...")
+        logger.info("Swing Trading Bot v2.14 starting...")
         logger.info("=" * 50)
 
         if not config.exchange.api_key:
@@ -905,7 +905,9 @@ class SwingBot:
         self.scheduler.start()
 
         notifier.send_sync(
-            f"🚀 <b>Swing Trading Bot v2.13 iniciado</b>\n\n"
+            f"🚀 <b>Swing Trading Bot v2.14 iniciado</b>\n\n"
+            f"🧭 Filtro de régimen: {'ON' if config.regime.enabled else 'OFF'} | "
+            f"TP +{config.risk.take_profit_pct:.0%} | Stop -{config.risk.stop_loss_pct:.1%}\n"
             f"💵 Balance: ${balance:.2f} USDT\n"
             f"📊 Pares: {', '.join(config.pairs.symbols)}\n"
             f"⏱ Scan cada {config.scanning.interval_minutes} min\n"
