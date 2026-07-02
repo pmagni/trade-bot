@@ -155,19 +155,18 @@ class Database:
         conn.close()
         return [dict(r) for r in rows]
 
-    def get_trades_today(self, symbol: str = None) -> int:
+    def get_trades_today(self, symbol: str = None, side: str = None) -> int:
         conn = self._get_conn()
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        query = "SELECT COUNT(*) as cnt FROM trades WHERE timestamp LIKE ?"
+        params: list = [f"{today}%"]
         if symbol:
-            row = conn.execute(
-                "SELECT COUNT(*) as cnt FROM trades WHERE symbol = ? AND timestamp LIKE ?",
-                (symbol, f"{today}%")
-            ).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT COUNT(*) as cnt FROM trades WHERE timestamp LIKE ?",
-                (f"{today}%",)
-            ).fetchone()
+            query += " AND symbol = ?"
+            params.append(symbol)
+        if side:
+            query += " AND side = ?"
+            params.append(side)
+        row = conn.execute(query, params).fetchone()
         conn.close()
         return row["cnt"]
 

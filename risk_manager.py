@@ -33,6 +33,11 @@ class RiskManager:
         if db.is_on_cooldown(symbol, "buy"):
             return False, f"{symbol} buy on cooldown"
 
+        # Max buys per day per asset
+        buys_today = db.get_trades_today(symbol, side="Buy")
+        if buys_today >= RC.max_trades_per_day_per_asset:
+            return False, f"{symbol} max {RC.max_trades_per_day_per_asset} buys/day reached"
+
         # Max open positions per asset
         open_positions = db.get_open_positions(symbol)
         open_count = len(open_positions)
