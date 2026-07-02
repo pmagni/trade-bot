@@ -195,6 +195,25 @@ class RegimeConfig:
     ema_mid_period: int = 50            # EMA media (sobre velas 4h) que define el downtrend de corto plazo
     reversal_override: bool = True      # permitir compra en downtrend si hay señal de giro confirmada
 
+    # v2.15 — Modo uptrend (uptrend = precio > EMA200 y EMA50 4h ascendente).
+    # Defaults calibrados por backtest 16 meses BTC+ETH (backtest.py, jul-2026):
+    #   baseline v2.14: -3.45% | combo (guard+reentry+sellfix): -1.38%, PF 1.09.
+    # Las piezas descartadas EMPEORAN el resultado — no activarlas sin re-backtestear:
+    #   pullback_score: -8.8% (compra pullbacks que siguen cayendo; los dips a banda
+    #                   inferior de BB ya los captura el scoring normal)
+    #   tight_stop:     resta ~0.8pp dentro del combo (2.5% es poco para vol 4h)
+    uptrend_mode_enabled: bool = True
+    uptrend_guard_relax: bool = True      # guard: RSI>70 solo bloquea con precio > banda sup.
+    uptrend_pullback_score: bool = False  # DESCARTADO por backtest (ver arriba)
+    uptrend_reentry: bool = True          # añadir a posiciones en ganancia sin spread -2%
+    uptrend_tight_stop: bool = False      # DESCARTADO por backtest (ver arriba)
+    uptrend_sell_rise_off: bool = True    # no puntuar rise_from_low como señal de venta
+    uptrend_pullback_min: float = 0.015   # retroceso mínimo desde máximo 48h para puntuar
+    uptrend_pullback_max: float = 0.035   # más allá de esto ya no es pullback sano
+    uptrend_rsi_pullback_lo: float = 40.0 # RSI en zona de pullback sano...
+    uptrend_rsi_pullback_hi: float = 55.0 # ...viniendo de >60 reciente
+    uptrend_stop_loss_pct: float = 0.025  # stop en entradas de uptrend (era 3.5% general)
+
 
 @dataclass
 class RiskConfig:
@@ -203,6 +222,12 @@ class RiskConfig:
     stop_loss_pct: float = 0.035        # v2.14: -3.5% (era -5%); ×1.6 en downtrend (v2.12)
     take_profit_pct: float = 0.03       # v2.14: toma de ganancia a +3% (0 = desactivado).
                                         # Asegura el perfil "ganancias pequeñas recurrentes".
+    # v2.15 — TP parcial con runner: al tocar +3% vende take_profit_sell_pct y deja
+    # correr el resto con trailing. DESACTIVADO por backtest 16m: -7.7% vs -3.45%
+    # baseline — el runner devuelve la ganancia porque el trailing solo se honra
+    # sobre la activación (+1.5%) y en caídas rápidas el runner cae hasta el stop.
+    take_profit_partial: bool = False
+    take_profit_sell_pct: float = 0.50  # fracción vendida al tocar el take-profit
     trailing_stop_activation: float = 0.015  # Activate trailing at +1.5%
     trailing_stop_distance: float = 0.008   # v2.14: 0.8% (< activación → realmente asegura la ganancia)
 

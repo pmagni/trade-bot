@@ -19,7 +19,8 @@ class RiskManager:
 
     def can_buy(self, symbol: str, amount_usdt: float,
                 available_usdt: float, total_portfolio: float,
-                current_price: float = 0.0, buy_score: int = 0) -> tuple[bool, str]:
+                current_price: float = 0.0, buy_score: int = 0,
+                in_uptrend: bool = False) -> tuple[bool, str]:
         """
         Check all risk rules before placing a buy.
         Returns (allowed, reason).
@@ -39,10 +40,18 @@ class RiskManager:
             return False, f"{symbol} max {RC.max_open_positions_per_asset} open positions reached"
 
         # Minimum entry spread: new entry must be ≥2% below cheapest existing open entry
+        # v2.15: en uptrend confirmado y con TODAS las posiciones en ganancia, se
+        # permite añadir en pullback sin exigir el -2% (piramidar en fuerza).
+        # El spread sigue aplicando para promediar posiciones en pérdida.
         if current_price > 0 and open_positions:
             cheapest = min(p["entry_price"] for p in open_positions)
             spread = (cheapest - current_price) / cheapest
-            if spread < RC.min_entry_spread_pct:
+            all_in_profit = all(current_price > p["entry_price"] for p in open_positions)
+            uptrend_add_ok = (
+                config.regime.uptrend_mode_enabled and config.regime.uptrend_reentry
+                and in_uptrend and all_in_profit
+            )
+            if spread < RC.min_entry_spread_pct and not uptrend_add_ok:
                 if spread <= 0:
                     msg = (
                         f"{symbol}: precio ${current_price:.2f} está por encima del "
@@ -178,7 +187,8 @@ class RiskManager:
 
     def calc_stop_loss_price(self, entry_price: float, leverage: float = 1.0,
                              key_stop_level: float = 0,
-                             above_ema200: bool = True) -> float:
+                             above_ema200: bool = True,
+                             in_uptrend: bool = False) -> float:
         """
         Calcula el precio de stop-loss.
 
@@ -193,6 +203,11 @@ class RiskManager:
         """
         if leverage > 1:
             sl_pct = RC.leverage_stop_loss_pct
+        elif (in_uptrend and config.regime.uptrend_mode_enabled
+                and config.regime.uptrend_tight_stop):
+            # v2.15: en uptrend los pullbacks sanos no perforan mucho más de 2.5%;
+            # si lo hacen, el régimen probablemente cambió y conviene salir barato.
+            sl_pct = config.regime.uptrend_stop_loss_pct
         elif not above_ema200 and CD.enabled:
             # Downtrend: stop más ancho para sobrevivir volatilidad intracandle
             sl_pct = RC.stop_loss_pct * CD.downtrend_stop_multiplier

@@ -99,6 +99,12 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions(symbol);
         """)
         conn.commit()
+        # v2.15 migration: tp_taken marca posiciones que ya cobraron su TP parcial
+        try:
+            conn.execute("ALTER TABLE positions ADD COLUMN tp_taken INTEGER DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # columna ya existe
         conn.close()
 
     # ─── TRADES ───
@@ -218,6 +224,19 @@ class Database:
         ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
+
+    def apply_partial_tp(self, position_id: int, remaining_qty: float,
+                         trailing_stop: float, trailing_max: float):
+        """v2.15 — Registra un take-profit parcial: reduce qty, marca tp_taken
+        y activa el trailing sobre el runner restante."""
+        conn = self._get_conn()
+        conn.execute("""
+            UPDATE positions SET qty = ?, value_usdt = ? * entry_price,
+                tp_taken = 1, trailing_stop = ?, trailing_max = ?
+            WHERE id = ?
+        """, (remaining_qty, remaining_qty, trailing_stop, trailing_max, position_id))
+        conn.commit()
+        conn.close()
 
     def update_trailing_stop(self, position_id: int, trailing_stop: float, trailing_max: float):
         conn = self._get_conn()

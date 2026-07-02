@@ -67,6 +67,17 @@ class Strategy:
         indicators["ema_mid_falling"] = (
             len(ema_mid_series) >= 2 and ema_mid_series.iloc[-1] < ema_mid_series.iloc[-2]
         )
+        indicators["ema_mid_rising"] = (
+            len(ema_mid_series) >= 2 and ema_mid_series.iloc[-1] > ema_mid_series.iloc[-2]
+        )
+
+        # v2.15 — Pullback dentro de uptrend: retroceso desde el máximo de 48h (12 velas 4h)
+        recent_12 = high.tail(12)
+        indicators["high_48h"] = recent_12.max()
+        indicators["pullback_48h"] = (
+            (indicators["high_48h"] - close.iloc[-1]) / indicators["high_48h"]
+            if indicators["high_48h"] > 0 else 0
+        )
 
         # EMA 200 (from daily data if available, else approximate from 4h)
         if candles_daily and len(candles_daily) >= IC.ema_trend:
@@ -90,6 +101,8 @@ class Strategy:
         rsi_series = self._calc_rsi_series(close, IC.rsi_period)
         indicators["rsi_prev"] = rsi_series.iloc[-2] if len(rsi_series) >= 2 else indicators["rsi"]
         indicators["rsi_rising_from_oversold"] = (indicators["rsi"] > 30 and indicators["rsi_prev"] <= 30)
+        # v2.15 — máximo RSI reciente (6 velas = 24h): detecta pullback desde momentum alto
+        indicators["rsi_recent_max"] = rsi_series.tail(6).max() if len(rsi_series) >= 6 else indicators["rsi"]
 
         # Volume analysis
         vol_avg = volume.rolling(IC.volume_period).mean().iloc[-1]
@@ -147,13 +160,21 @@ class Strategy:
         details = {}
 
         # Overbought guard: don't buy into overbought territory
-        # v2.13.1: RSI>70 alone is sufficient — no need to also pierce upper BB
+        # v2.15: en uptrend confirmado, RSI>70 es normal — solo bloquea si ADEMÁS
+        # el precio está sobre la banda superior (extensión real). Fuera de uptrend,
+        # RSI>70 solo sigue bloqueando (v2.13.1).
         rsi = indicators["rsi"]
+        in_uptrend = (config.regime.uptrend_mode_enabled
+                      and self.regime_is_uptrend(indicators))
         if rsi > IC.rsi_overbought:
-            details["overbought_guard"] = (
-                f"BLOCKED: RSI {rsi:.1f} > {IC.rsi_overbought} & above upper BB"
-            )
-            return 0, details
+            extended = indicators["price"] > indicators["bb_upper"]
+            guard_relaxed = in_uptrend and config.regime.uptrend_guard_relax
+            if not guard_relaxed or extended:
+                details["overbought_guard"] = (
+                    f"BLOCKED: RSI {rsi:.1f} > {IC.rsi_overbought}"
+                    + (" & above upper BB" if extended else "")
+                )
+                return 0, details
 
         # RSI
         if rsi < IC.rsi_extreme_oversold:
@@ -217,6 +238,27 @@ class Strategy:
             score += zone_score
             details["zone"] = f"Price in {indicators['zone']} zone +{zone_score}"
 
+        # v2.15 — Pullback dentro de uptrend confirmado: las "bajas" que se compran
+        # en un rally son los retrocesos menores, no la sobreventa profunda.
+        if in_uptrend and config.regime.uptrend_pullback_score:
+            RG = config.regime
+            if (indicators["price"] <= indicators["ema_slow"]
+                    and indicators.get("ema_mid_rising")):
+                score += 2
+                details["uptrend_pullback_ema"] = "Pullback a EMA21 con EMA50 ascendente +2"
+            pb = indicators.get("pullback_48h", 0)
+            if RG.uptrend_pullback_min <= pb <= RG.uptrend_pullback_max:
+                score += 2
+                details["uptrend_pullback_48h"] = (
+                    f"Retroceso {pb:.1%} desde máximo 48h (pullback sano) +2"
+                )
+            if (RG.uptrend_rsi_pullback_lo <= rsi <= RG.uptrend_rsi_pullback_hi
+                    and indicators.get("rsi_recent_max", 0) > 60):
+                score += 1
+                details["uptrend_rsi_pullback"] = (
+                    f"RSI {rsi:.1f} en zona pullback tras momentum >60 +1"
+                )
+
         # Key support levels (multi-tier): find best matching support within tolerance
         # v2.13: prefer dynamic levels (auto-updated daily) over static config
         kl = db.get_effective_levels(symbol)
@@ -241,6 +283,18 @@ class Strategy:
                 details["key_support"] = best_label
 
         return score, details
+
+    def regime_is_uptrend(self, indicators: dict) -> bool:
+        """
+        v2.15 — Uptrend confirmado: precio sobre EMA200 y EMA50 4h ascendente.
+        Espejo del downtrend que usa regime_allows_buy. Habilita el modo de
+        compra por pullback y las reglas de re-entrada/stop de uptrend.
+        """
+        return (
+            indicators.get("above_ema_200", False)
+            and indicators.get("ema_mid", 0) > 0
+            and indicators.get("ema_mid_rising", False)
+        )
 
     def regime_allows_buy(self, indicators: dict) -> Tuple[bool, str]:
         """
@@ -278,7 +332,8 @@ class Strategy:
 
         return False, "BLOQUEADO: downtrend confirmado (precio<EMA50 bajista y <EMA200)"
 
-    def calc_sell_score(self, indicators: dict, positions: list = None, symbol: str = "") -> Tuple[int, dict]:
+    def calc_sell_score(self, indicators: dict, positions: list = None, symbol: str = "",
+                        now=None) -> Tuple[int, dict]:
         """
         Calculate sell score (0-15+).
         Returns (score, details_dict).
@@ -320,13 +375,20 @@ class Strategy:
             details["fear_greed"] = f"Fear and Greed {fg} (extreme greed) +2"
 
         # Rise from local low
+        # v2.15: en uptrend confirmado NO puntúa — estar lejos del mínimo de 14d
+        # es la definición del régimen alcista, no evidencia de reversión. Puntuarla
+        # expulsaba las posiciones a horas de abiertas y convertía el rally en churn.
+        in_uptrend = (config.regime.uptrend_mode_enabled
+                      and config.regime.uptrend_sell_rise_off
+                      and self.regime_is_uptrend(indicators))
         rise = indicators["rise_from_low"]
-        if rise > IC.rise_strong:
-            score += 3
-            details["rise"] = f"Rise {rise:.1%} from 14d low (strong) +3"
-        elif rise > IC.rise_moderate:
-            score += 2
-            details["rise"] = f"Rise {rise:.1%} from 14d low (moderate) +2"
+        if not in_uptrend:
+            if rise > IC.rise_strong:
+                score += 3
+                details["rise"] = f"Rise {rise:.1%} from 14d low (strong) +3"
+            elif rise > IC.rise_moderate:
+                score += 2
+                details["rise"] = f"Rise {rise:.1%} from 14d low (moderate) +2"
 
         # Resistance zone
         zone_score = indicators.get("zone_score", 0)
@@ -347,7 +409,9 @@ class Strategy:
         # Time-decay: push losing positions toward exit
         if positions:
             from datetime import datetime, timezone
-            now = datetime.now(timezone.utc)
+            # now inyectable para backtesting (reloj de simulación); en vivo usa reloj real
+            if now is None:
+                now = datetime.now(timezone.utc)
             for p in positions:
                 entry_time = datetime.fromisoformat(p["entry_time"])
                 hours_open = (now - entry_time).total_seconds() / 3600
@@ -668,11 +732,21 @@ class Strategy:
         pnl_pct = (current_price - entry_price) / entry_price
 
         # v2.14 — Take-profit: asegura la ganancia pequeña antes de que se evapore.
+        # v2.15 — Si take_profit_partial: vende solo una fracción y deja un runner
+        # con trailing. Las posiciones con tp_taken=1 ya cobraron su parcial y las
+        # gestiona únicamente el trailing de más abajo.
         tp = config.risk.take_profit_pct
-        if tp > 0 and pnl_pct >= tp:
+        if tp > 0 and pnl_pct >= tp and not position.get("tp_taken"):
+            if config.risk.take_profit_partial:
+                return True, f"take_profit_partial ({pnl_pct:+.1%})"
             return True, f"take_profit ({pnl_pct:+.1%})"
 
         # Trailing stop
+        # NOTA (v2.15, backtesteado): el trailing solo se honra con pnl >= activación.
+        # Parece un bug (en caídas bruscas el chequeo se salta y la posición cae al
+        # stop fijo), pero honrarlo siempre resultó MUCHO peor en backtest 16m
+        # (-3.4% → -12.9%): cortaba a +0.7% posiciones que se recuperaban hasta el TP.
+        # Dejar respirar bajo la activación es intencional. No "arreglar" sin backtest.
         if pnl_pct >= config.risk.trailing_stop_activation:
             new_max = max(trailing_max, current_price)
             new_trailing = new_max * (1 - config.risk.trailing_stop_distance)

@@ -286,9 +286,11 @@ class SwingBot:
             logger.info(f"{symbol}: Buy score {buy_score} but insufficient funds or below minimum")
             return False
 
+        in_uptrend = strategy.regime_is_uptrend(indicators)
         allowed, reason = risk_manager.can_buy(
             symbol, amount, available, total,
             current_price=price, buy_score=buy_score,
+            in_uptrend=in_uptrend,
         )
         if not allowed:
             logger.info(f"{symbol}: Buy blocked - {reason}")
@@ -322,7 +324,8 @@ class SwingBot:
             key_stop = db.get_effective_levels(symbol).get("stop_level", 0)
             above_ema200 = indicators.get("above_ema_200", True)
             sl_price = risk_manager.calc_stop_loss_price(
-                fill_price, leverage, key_stop, above_ema200=above_ema200
+                fill_price, leverage, key_stop, above_ema200=above_ema200,
+                in_uptrend=in_uptrend,
             )
 
             db.record_trade(
@@ -489,6 +492,45 @@ class SwingBot:
 
         for pos in open_positions:
             should_close, reason = strategy.check_stop_loss(pos, current_price)
+
+            if (should_close and reason.startswith("take_profit_partial")
+                    and pos["trade_type"] == "spot"):
+                # v2.15 — TP parcial: vende la fracción configurada, el resto queda
+                # como runner con trailing activado. Si el runner quedaría bajo el
+                # mínimo de orden, se cierra todo (fallback al TP completo).
+                try:
+                    sell_qty = pos["qty"] * config.risk.take_profit_sell_pct
+                    runner_qty = pos["qty"] - sell_qty
+                    if runner_qty * current_price < config.risk.min_order_usdt:
+                        reason = f"take_profit (runner < min) {reason}"
+                        # cae al bloque de cierre total de abajo
+                    else:
+                        exchange.place_spot_market_sell(symbol, sell_qty)
+                        pnl_usdt = (current_price - pos["entry_price"]) * sell_qty
+                        pnl_pct = (current_price - pos["entry_price"]) / pos["entry_price"]
+                        trailing = current_price * (1 - config.risk.trailing_stop_distance)
+                        db.apply_partial_tp(pos["id"], runner_qty, trailing, current_price)
+                        db.record_trade(
+                            symbol=symbol, side="Sell", qty=sell_qty,
+                            price=current_price,
+                            value_usdt=current_price * sell_qty,
+                            notes=reason,
+                        )
+                        risk_manager.set_sell_cooldown(symbol)
+                        notifier.send_sync(notifier.format_sell_alert(
+                            symbol, current_price, sell_qty,
+                            current_price * sell_qty, 0,
+                            {"take_profit_partial": reason}, pnl_usdt, pnl_pct
+                        ))
+                        logger.info(
+                            f"TP PARCIAL {symbol}: ${pnl_usdt:+.2f} ({pnl_pct:+.1%}) — "
+                            f"runner {runner_qty:.6f} con trailing @ ${trailing:,.2f}"
+                        )
+                        continue
+                except Exception as e:
+                    logger.error(f"Partial TP execution error for {symbol}: {e}")
+                    notifier.send_sync(notifier.format_error(f"TP parcial {symbol}", str(e)))
+                    continue
 
             if should_close:
                 try:
@@ -840,7 +882,7 @@ class SwingBot:
     async def start(self):
         """Start the bot."""
         logger.info("=" * 50)
-        logger.info("Swing Trading Bot v2.14 starting...")
+        logger.info("Swing Trading Bot v2.15 starting...")
         logger.info("=" * 50)
 
         if not config.exchange.api_key:
@@ -905,8 +947,9 @@ class SwingBot:
         self.scheduler.start()
 
         notifier.send_sync(
-            f"🚀 <b>Swing Trading Bot v2.14 iniciado</b>\n\n"
-            f"🧭 Filtro de régimen: {'ON' if config.regime.enabled else 'OFF'} | "
+            f"🚀 <b>Swing Trading Bot v2.15 iniciado</b>\n\n"
+            f"🧭 Régimen: {'ON' if config.regime.enabled else 'OFF'} | "
+            f"Uptrend: {'ON' if config.regime.uptrend_mode_enabled else 'OFF'} | "
             f"TP +{config.risk.take_profit_pct:.0%} | Stop -{config.risk.stop_loss_pct:.1%}\n"
             f"💵 Balance: ${balance:.2f} USDT\n"
             f"📊 Pares: {', '.join(config.pairs.symbols)}\n"
