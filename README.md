@@ -1,6 +1,6 @@
-# Swing Trading Bot v2.15
+# Swing Trading Bot v2.16
 
-Automated crypto swing trading bot (BTC, ETH, SOL, XRP, BNB) running on Bybit Spot. Scans every 15 minutes, scores setups using technical indicators + key levels, applies a regime filter (downtrend block + uptrend mode), and executes size-adjusted trades with DCA escalation, take-profit and trailing stop-loss.
+Automated crypto swing trading bot (BTC, ETH, BNB) running on Bybit Spot. Scans every 15 minutes, scores setups using technical indicators + key levels, applies a regime filter (downtrend block + uptrend mode), and executes size-adjusted trades with DCA escalation, take-profit and trailing stop-loss.
 
 ---
 
@@ -155,6 +155,7 @@ Manual support/resistance levels with score bonuses. Each level fires when price
 
 | Version | Change |
 |---------|--------|
+| v2.16 | **Universo recortado: fuera SOLUSDT y XRPUSDT.** El backtest v2.15 (combo) solo se había validado sobre BTC+ETH; corrido sobre el universo real de 5 activos (16.5m, mar-2025→ago-2026) da **−10.39%**, no el +2.14% reportado. Atribución: XRP −$125.4 P&L (win 36%) y SOL −$29.0 (win 58%), ambos en downtrend estructural −30% a −45% del periodo — el filtro de régimen (4h/EMA200) no los protege porque `reversal_override` sigue comprando rebotes muertos. Sin XRP/SOL: BTC+ETH+BNB combo **+7.17%** / baseline +7.20%, PF 1.38-1.40, 227 cierres. Ver `docs/AUDITORIA_2026-08-16.md`. |
 | v2.15 | **Modo uptrend** validado por backtest 16m con atribución por pieza (`backtest.py`): guard de sobrecompra relajado en uptrend, re-entrada/piramidación con posiciones en ganancia sin spread −2%, `rise_from_low` fuera del sell score en uptrend. Baseline −3.45% → combo −1.38% (PF 1.09). Descartados con evidencia (flags apagados en config): pullback score (−8.8%), TP parcial con runner (−7.7%), stop 2.5% en uptrend, trailing estricto (−12.9%). |
 | v2.14 | **Filtro de régimen** (no comprar reversión en downtrend confirmado) + **take-profit +3%** + stop −5%→−3.5% + trailing 2%→0.8% + auto-reanudación tras circuit breaker + cooldowns más cortos. Validado en backtest 16m (ver `docs/AUDITORIA_2026-06-27.md`). |
 | v2.11 | Recalibrated key levels for May 23 regime; BTC stop_level 76K→70K |

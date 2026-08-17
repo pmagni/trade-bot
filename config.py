@@ -28,14 +28,20 @@ class TelegramConfig:
 
 @dataclass
 class TradingPairs:
-    """Trading pair configuration."""
+    """Trading pair configuration.
+
+    v2.16 — SOLUSDT y XRPUSDT removidos del universo. Backtest 16.5m (mar-2025→
+    ago-2026, datos Bybit) sobre el universo completo de 5 activos: combo v2.15
+    -10.39% (XRP solo: -$125.4 de P&L, win 36%; SOL: -$29.0, win 58% — ambos en
+    downtrend estructural -30% a -45% del periodo). Sin XRP/SOL: BTC+ETH+BNB
+    combo +7.17% / baseline +7.20%, PF 1.38-1.40, 227 cierres. Ver
+    docs/AUDITORIA_2026-08-16.md antes de reincorporarlos sin re-backtestear.
+    """
     symbols: list = field(default_factory=lambda: [
-        "BTCUSDT", "ETHUSDT",
-        "SOLUSDT", "XRPUSDT", "BNBUSDT",
+        "BTCUSDT", "ETHUSDT", "BNBUSDT",
     ])
     base_assets: list = field(default_factory=lambda: [
-        "BTC", "ETH",
-        "SOL", "XRP", "BNB",
+        "BTC", "ETH", "BNB",
     ])
     quote_asset: str = "USDT"
 
@@ -313,40 +319,6 @@ class KeyLevelsConfig:
                 {"price": 2000, "label": "Resistencia psicologica clave",          "score_bonus": 2},
             ],
             "stop_level": 1580,
-        },
-        "SOLUSDT": {
-            # Updated Jun 15 — SOL en ~$78 (rally +13% desde $69; puede estar overbought)
-            # Esperar pullback a zona $70-72 para entrar. Resistencia en $80-85.
-            # stop_level: $65 = aprox -10% desde zona de entrada $70-72.
-            "supports": [
-                {"price": 74,  "label": "Soporte de corto plazo / pullback zone", "score_bonus": 1},
-                {"price": 70,  "label": "Resistencia rota → soporte clave",       "score_bonus": 2},
-                {"price": 65,  "label": "Zona de acumulacion previa",             "score_bonus": 2},
-                {"price": 58,  "label": "Soporte estructural fuerte",             "score_bonus": 3},
-            ],
-            "resistances": [
-                {"price": 80,  "label": "Resistencia psicologica",               "score_bonus": 1},
-                {"price": 85,  "label": "Zona de resistencia mayor",             "score_bonus": 2},
-                {"price": 95,  "label": "Resistencia historica",                 "score_bonus": 2},
-            ],
-            "stop_level": 65,
-        },
-        "XRPUSDT": {
-            # Added Jun 13 — XRP en ~$1.15 (86% comunidad bullish; claridad regulatoria)
-            # Recuperacion desde minimos; soporte en $1.05-1.10.
-            # stop_level: $0.97 = aprox -15% desde zona de entrada $1.10-1.15.
-            "supports": [
-                {"price": 1.10, "label": "Soporte inmediato / consolidacion", "score_bonus": 1},
-                {"price": 1.00, "label": "Soporte psicologico fuerte",        "score_bonus": 2},
-                {"price": 0.90, "label": "Zona de acumulacion 2024",          "score_bonus": 2},
-                {"price": 0.75, "label": "Soporte estructural profundo",       "score_bonus": 3},
-            ],
-            "resistances": [
-                {"price": 1.20, "label": "Resistencia inmediata",             "score_bonus": 1},
-                {"price": 1.35, "label": "Zona de resistencia media",         "score_bonus": 2},
-                {"price": 1.55, "label": "Resistencia historica 2024",        "score_bonus": 2},
-            ],
-            "stop_level": 0.97,
         },
         "BNBUSDT": {
             # Added Jun 13 — BNB en ~$609 (exchange token con utilidad propia)
