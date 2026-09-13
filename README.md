@@ -40,6 +40,14 @@ TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 ```
 
+**Production deployment (v2.17+):** run under systemd, not `nohup`/manual —
+see `deploy/swingbot.service`. The bot also refuses to start a second
+instance on its own (`bot.pid` guard in `bot.py`): if a stale process is
+still holding the lock, check `systemctl status swingbot` / `ps -p <pid>`
+before force-removing `bot.pid`. This replaces the ad-hoc restart flow that
+caused a dual-instance Telegram polling conflict (409) during the Aug 2026
+deploy — see `docs/AUDITORIA_2026-08-16.md`.
+
 **Production (systemd):**
 ```
 Server: root@159.223.8.250
