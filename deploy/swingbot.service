@@ -40,12 +40,35 @@ User=REPLACE_WITH_DEPLOY_USER
 WorkingDirectory=/opt/dcabot
 ExecStartPre=/bin/rm -f /opt/dcabot/bot.pid
 ExecStart=/opt/dcabot/venv/bin/python /opt/dcabot/bot.py
-Restart=on-failure
+# v2.17.1 — `always`, no `on-failure`.
+#
+# Root cause del blackout 2026-06-04→06 (55h sin escanear): el bot murió y
+# nada lo levantó. Dos posiciones ETH quedaron sin vigilancia mientras el
+# precio atravesaba sus stops (1693.95 y 1652.74); al revivir se liquidaron
+# a 1550.62 → -13.0% y -10.9%, las dos peores pérdidas del bot (-$4.5, ~80%
+# del PnL neto histórico). `on-failure` no cubre salida limpia (exit 0) ni
+# SIGTERM externo — `always` sí. Un `systemctl stop` manual se sigue
+# respetando, así que no interfiere con la operación normal.
+Restart=always
 RestartSec=15
-# Evita reinicios en loop apretado si el bot crashea repetidamente
-# (p. ej. credenciales inválidas) — corta después de 5 intentos en 10 min.
-StartLimitIntervalSec=600
-StartLimitBurst=5
+
+# SIN rate limit de arranque, deliberadamente.
+#
+# Hasta v2.17 esto era `StartLimitIntervalSec=600` + `StartLimitBurst=5` en
+# [Service] — donde systemd las IGNORA en silencio ("Unknown key name ...
+# in section 'Service', ignoring"), dejando el default de 10s. O sea: nunca
+# estuvieron activas. Moverlas a [Unit] las activaría de verdad, y ahí está
+# el problema: con RestartSec=15, cinco reinicios ocurren en 75s, bien
+# dentro de la ventana de 600s → systemd se rinde y deja el bot muerto en
+# silencio. Eso es exactamente el modo de falla de junio.
+#
+# El limitador protege contra crash-loops apretados, pero RestartSec=15 ya
+# acota a 4 intentos/min (inofensivo para Bybit y Telegram). Con posiciones
+# abiertas sin vigilancia, morir en silencio es mucho peor que reintentar.
+#
+# Reintroducirlo SOLO cuando exista alerta de caída (deadman externo que
+# vigile bot_state.last_scan_time); ahí un `OnFailure=` avisaría en vez de
+# fallar callado.
 
 # Endurecimiento básico (no afecta la lógica de trading)
 NoNewPrivileges=true
