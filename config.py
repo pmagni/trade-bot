@@ -27,6 +27,24 @@ class TelegramConfig:
 
 
 @dataclass
+class MonitoringConfig:
+    """
+    v2.18 — Deadman switch externo.
+
+    El bot pinguea esta URL al final de cada scan_cycle exitoso. Si los pings
+    paran (proceso muerto, droplet caído, red cortada, scan colgado), el
+    servicio externo alerta. Vacío = desactivado, el bot corre igual.
+
+    Es una capability URL: quien la tenga puede falsificar heartbeats y anular
+    el deadman. Va en .env (gitignoreado), nunca en el repo.
+
+    Motivo: blackout de 55h el 2026-06-04/06 que costó -$4.53 (~80% del PnL
+    neto histórico). Ver docs/superpowers/specs/2026-09-13-v2.18-*.md
+    """
+    heartbeat_url: str = os.getenv("HEARTBEAT_URL", "")
+
+
+@dataclass
 class TradingPairs:
     """Trading pair configuration.
 
@@ -388,6 +406,7 @@ class Config:
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
     sell_guard: SellGuardConfig = field(default_factory=SellGuardConfig)
+    monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     regime: RegimeConfig = field(default_factory=RegimeConfig)
     crash_detector: CrashDetectorConfig = field(default_factory=CrashDetectorConfig)
     key_levels: KeyLevelsConfig = field(default_factory=KeyLevelsConfig)
