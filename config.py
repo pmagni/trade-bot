@@ -275,6 +275,27 @@ class RiskConfig:
 
 
 @dataclass
+class SellGuardConfig:
+    """
+    v2.17 — Paridad de riesgo compra/venta (propuesto, NO validado por
+    backtest todavía — default OFF).
+
+    Auditoría 2026-08-16/2026-09-13: el path de compra apila 4 compuertas
+    (regime filter, crash detector consecutivo, crash velocity, proximidad
+    a resistencia) antes de ejecutar. El path de venta solo chequea
+    `sell_score >= sell_partial` — sin equivalente. Esta config añade el
+    espejo del check de resistencia de compra: bloquear una venta que
+    caería justo sobre un soporte clave (mismo mecanismo, sentido opuesto).
+
+    IMPORTANTE: dejar `near_support_gate_enabled=False` hasta correr
+    `backtest.py` con un variant dedicado — ver docs/AUDITORIA de ago-2026.
+    No activar en producción sin ese resultado.
+    """
+    near_support_gate_enabled: bool = False  # OFF por defecto — pendiente de backtest
+    # Reutiliza config.key_levels.tolerance_pct para la banda de proximidad.
+
+
+@dataclass
 class KeyLevelsConfig:
     """Manual key support/resistance levels per asset (multi-tier).
     Each asset has lists of supports/resistances with price, label, and score_bonus.
@@ -366,6 +387,7 @@ class Config:
     indicators: IndicatorConfig = field(default_factory=IndicatorConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
+    sell_guard: SellGuardConfig = field(default_factory=SellGuardConfig)
     regime: RegimeConfig = field(default_factory=RegimeConfig)
     crash_detector: CrashDetectorConfig = field(default_factory=CrashDetectorConfig)
     key_levels: KeyLevelsConfig = field(default_factory=KeyLevelsConfig)

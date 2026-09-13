@@ -3,6 +3,7 @@
 *.db-shm
 *.db-wal
 *.log
+bot.pid
 __pycache__/
 *.pyc
 .DS_Store

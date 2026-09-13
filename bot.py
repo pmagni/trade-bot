@@ -5,6 +5,8 @@ Runs the scanning loop, executes trades, and manages the bot lifecycle.
 
 import logging
 import asyncio
+import atexit
+import os
 import sys
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
@@ -29,6 +31,46 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("bot")
+
+# ─── SINGLE-INSTANCE GUARD ───
+# v2.17: previene el escenario de ago-2026 — un nohup/systemd restart dejó dos
+# procesos bot.py vivos simultáneamente, y ambos hicieron polling contra el
+# mismo token de Telegram (getUpdates 409 Conflict). Un PID file simple basta:
+# si ya hay un proceso vivo con ese PID al arrancar, se aborta en vez de
+# arrancar un segundo scan loop / segundo Telegram poller.
+PID_FILE = "bot.pid"
+
+
+def _acquire_single_instance_lock():
+    """Aborta si ya hay un proceso bot.py corriendo (mismo PID file)."""
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE) as f:
+                old_pid = int(f.read().strip())
+            os.kill(old_pid, 0)  # no mata; solo prueba si el PID sigue vivo
+        except (ValueError, ProcessLookupError, PermissionError):
+            pass
+        else:
+            logger.error(
+                f"Ya hay un proceso bot.py corriendo (PID {old_pid}, {PID_FILE}). "
+                f"Abortando para evitar doble polling de Telegram / doble scan loop. "
+                f"Si el PID quedó huérfano, verificalo (`ps -p {old_pid}`) y borrá {PID_FILE}."
+            )
+            sys.exit(1)
+
+    with open(PID_FILE, "w") as f:
+        f.write(str(os.getpid()))
+
+    def _release():
+        try:
+            if os.path.exists(PID_FILE):
+                with open(PID_FILE) as f:
+                    if f.read().strip() == str(os.getpid()):
+                        os.remove(PID_FILE)
+        except OSError:
+            pass
+
+    atexit.register(_release)
 
 
 class SwingBot:
@@ -125,8 +167,22 @@ class SwingBot:
 
                     # Execute sell if score is high enough
                     if signals["sell_score"] >= config.scoring.sell_partial:
-                        sold = await self._execute_sell(symbol, signals)
-                        signals["sell_action"] = "SOLD" if sold else "Blocked (no position / cooldown)"
+                        # v2.17 — Paridad con el path de compra (propuesto, OFF por
+                        # defecto — ver SellGuardConfig): no vender justo sobre un
+                        # soporte clave, espejo del check de resistencia en compra.
+                        near_support = False
+                        if config.sell_guard.near_support_gate_enabled:
+                            kl = db.get_effective_levels(symbol)
+                            for s in kl.get("supports", []):
+                                dist = abs(signals["indicators"]["price"] - s["price"]) / s["price"]
+                                if dist <= config.key_levels.tolerance_pct:
+                                    near_support = True
+                                    signals["sell_action"] = f"Blocked: near support {s['label']} ${s['price']:,.0f}"
+                                    logger.info(f"{symbol}: Sell blocked — price near support {s['label']}")
+                                    break
+                        if not near_support:
+                            sold = await self._execute_sell(symbol, signals)
+                            signals["sell_action"] = "SOLD" if sold else "Blocked (no position / cooldown)"
                     elif signals["sell_score"] > 0:
                         signals["sell_action"] = f"Score {signals['sell_score']} (need {config.scoring.sell_partial}+)"
                         logger.info(
@@ -983,6 +1039,7 @@ class SwingBot:
 
 
 def main():
+    _acquire_single_instance_lock()
     bot = SwingBot()
     asyncio.run(bot.start())
 

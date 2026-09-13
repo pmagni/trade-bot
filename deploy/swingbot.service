@@ -1,0 +1,55 @@
+# Swing Trading Bot — systemd unit
+#
+# v2.17: reemplaza el arranque manual (nohup python bot.py &) que causó el
+# incidente de ago-2026 — el proceso quedó huérfano de systemd, un restart
+# manual dejó dos procesos bot.py vivos en simultáneo, y ambos hicieron
+# polling contra el mismo token de Telegram (getUpdates 409 Conflict).
+#
+# systemd garantiza: un solo proceso administrado, restart automático si
+# crashea, logs centralizados en journalctl, y stop/start limpio. El PID
+# file guard en bot.py (_acquire_single_instance_lock) es la segunda línea
+# de defensa si alguna vez se arranca por fuera de systemd también.
+#
+# Instalación (en el servidor, como root o con sudo):
+#   cp deploy/swingbot.service /etc/systemd/system/swingbot.service
+#   # editar User=, WorkingDirectory= y ExecStart= abajo si difieren
+#   systemctl daemon-reload
+#   systemctl enable swingbot
+#   systemctl start swingbot
+#
+# Antes de instalar: si hay un proceso bot.py corriendo por fuera de systemd
+# (nohup / manual), pararlo primero (`kill <pid>`, esperar a que el
+# bot.pid guard confirme que no quedó huérfano) para no terminar con dos
+# instancias compitiendo por el mismo token de Telegram.
+#
+# Operación:
+#   systemctl status swingbot     # estado + últimas líneas de log
+#   journalctl -u swingbot -f     # logs en vivo
+#   systemctl restart swingbot    # restart limpio (systemd espera el stop
+#                                 # antes de arrancar de nuevo — no duplica)
+#   systemctl stop swingbot
+
+[Unit]
+Description=Swing Trading Bot (crypto, Bybit spot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=REPLACE_WITH_DEPLOY_USER
+WorkingDirectory=/opt/dcabot
+ExecStartPre=/bin/rm -f /opt/dcabot/bot.pid
+ExecStart=/opt/dcabot/venv/bin/python /opt/dcabot/bot.py
+Restart=on-failure
+RestartSec=15
+# Evita reinicios en loop apretado si el bot crashea repetidamente
+# (p. ej. credenciales inválidas) — corta después de 5 intentos en 10 min.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+# Endurecimiento básico (no afecta la lógica de trading)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
