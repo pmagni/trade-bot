@@ -27,13 +27,28 @@ _en_fallo = {}
 
 
 def _avisar(symbol: str, fallo: bool, detalle: str = ""):
+    """
+    Nunca puede lanzar: se llama, entre otros sitios, desde el `except` de
+    `reconcile()` — justo cuando la red ya es sospechosa. `notifier.send_sync`
+    solo atrapa `RuntimeError`; un fallo de Telegram de otro tipo (timeout,
+    conexión) tiene que morir acá, no propagarse.
+
+    El estado en `_en_fallo` se actualiza SIEMPRE, incluso si la notificación
+    falló: si no, una alerta de "entrando en fallo" que no pudo mandarse deja
+    el estado sin cambiar y el bot reintenta mandarla en cada scan siguiente,
+    justo el spam que este throttle existe para evitar.
+    """
     previo = _en_fallo.get(symbol, False)
-    if fallo and not previo:
-        notifier.send_sync(
-            f"⚠️ <b>Stop nativo</b> {symbol}\nNo se pudo sincronizar: {detalle}")
-    elif previo and not fallo:
-        notifier.send_sync(f"✅ <b>Stop nativo</b> {symbol}\nSincronización restablecida")
-    _en_fallo[symbol] = fallo
+    try:
+        if fallo and not previo:
+            notifier.send_sync(
+                f"⚠️ <b>Stop nativo</b> {symbol}\nNo se pudo sincronizar: {detalle}")
+        elif previo and not fallo:
+            notifier.send_sync(f"✅ <b>Stop nativo</b> {symbol}\nSincronización restablecida")
+    except Exception as e:
+        logger.warning(f"Stops nativos {symbol}: no se pudo notificar ({type(e).__name__}: {e})")
+    finally:
+        _en_fallo[symbol] = fallo
 
 
 def reconcile(symbols: Optional[List[str]] = None) -> None:
