@@ -7,7 +7,8 @@ al instante y venda una posición sana. Quedarse sin red es preferible.
 
 import pytest
 
-from native_stops import DesiredStop, desired_stops, ReconcilePlan, reconcile_plan
+from native_stops import (DesiredStop, desired_stops, ReconcilePlan, reconcile_plan,
+                          falta_balance, parse_position_id)
 
 
 def _pos(pos_id=1, symbol="BNBUSDT", qty=0.02, stop_loss=600.0):
@@ -225,3 +226,42 @@ def test_posicion_id_no_parseable_no_se_toca():
 
     assert plan.to_cancel == []
     assert plan.to_place == []
+
+
+def test_falta_balance_detecta_cierre_externo():
+    """Falta medio BNB a $650 = $325, muy por encima del umbral de polvo."""
+    assert falta_balance(tracked_qty=1.0, balance=0.5, price=650.0,
+                         dust_threshold=5.0) is True
+
+
+def test_falta_balance_tolera_fees_en_activo_base():
+    """
+    Bybit cobra fees en el activo base, así que el balance SIEMPRE queda un
+    poco por debajo de lo registrado. Sin tolerancia esto sería un falso
+    positivo en cada scan.
+    """
+    assert falta_balance(tracked_qty=1.0, balance=0.999, price=650.0,
+                         dust_threshold=5.0) is False
+
+
+def test_falta_balance_compara_en_usdt_no_en_cantidad():
+    """
+    La misma cantidad faltante significa cosas distintas según el activo.
+    0.005 de BTC a $77000 son $385 (cierre real); 0.005 de BNB a $650 son
+    $3.25 (polvo de fees).
+    """
+    assert falta_balance(1.0, 0.995, price=77000.0, dust_threshold=5.0) is True
+    assert falta_balance(1.0, 0.995, price=650.0, dust_threshold=5.0) is False
+
+
+def test_falta_balance_ignora_balance_de_mas():
+    """Sobrante es asunto de _sweep_dust, no de esta detección."""
+    assert falta_balance(1.0, 1.5, price=650.0, dust_threshold=5.0) is False
+
+
+def test_parse_position_id():
+    assert parse_position_id("nsl-42-1699999999000") == 42
+    assert parse_position_id("nsl-abc-1699999999000") is None
+    assert parse_position_id("nsl-42") is None        # formato viejo, ya no válido
+    assert parse_position_id("otra-cosa-123") is None
+    assert parse_position_id("") is None

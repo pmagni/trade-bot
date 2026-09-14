@@ -116,9 +116,15 @@ def _misma(stop: DesiredStop, orden: dict) -> bool:
             and math.isclose(trigger, stop.trigger_price, rel_tol=1e-6))
 
 
-def _parse_position_id(link_id: str) -> Optional[int]:
-    """Extrae position_id de un link_id con formato 'nsl-{pos_id}-{now_ms}'."""
-    if not link_id.startswith(LINK_PREFIX):
+def parse_position_id(link_id: str) -> Optional[int]:
+    """
+    Extrae position_id de un link_id con formato 'nsl-{pos_id}-{now_ms}'.
+
+    Pública (sin guion bajo) porque la cáscara también la consume, para
+    resolver el position_id exacto a partir de un orderLinkId de una orden
+    ya ejecutada — sin adivinar cuál posición se cerró.
+    """
+    if not link_id or not link_id.startswith(LINK_PREFIX):
         return None
 
     parts = link_id.split('-')
@@ -157,7 +163,7 @@ def reconcile_plan(desired: Dict[int, DesiredStop],
     nuestras = {}
     for orden in actual:
         link_id = orden.get("orderLinkId") or ""
-        pos_id = _parse_position_id(link_id)
+        pos_id = parse_position_id(link_id)
 
         if pos_id is not None:
             if pos_id not in nuestras:
@@ -181,3 +187,21 @@ def reconcile_plan(desired: Dict[int, DesiredStop],
             to_cancel.append(orden["orderId"])
 
     return ReconcilePlan(to_place=to_place, to_cancel=to_cancel)
+
+
+def falta_balance(tracked_qty: float, balance: float, price: float,
+                  dust_threshold: float) -> bool:
+    """
+    ¿Hay menos activo del que la DB dice que tenemos? Eso significa que una
+    posición se cerró sin que el bot lo registre — típicamente un stop nativo
+    que disparó con el proceso muerto.
+
+    La comparación es en USDT, no en cantidad de base: `dust_threshold` está en
+    USDT, y una misma cantidad significa cosas muy distintas en BTC y en BNB.
+
+    El caso inverso (balance de más) es asunto de `_sweep_dust`, no de acá.
+    """
+    faltante = tracked_qty - balance
+    if faltante <= 0:
+        return False
+    return faltante * price > dust_threshold

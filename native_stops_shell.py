@@ -51,6 +51,78 @@ def _avisar(symbol: str, fallo: bool, detalle: str = ""):
         _en_fallo[symbol] = fallo
 
 
+def detectar_cierres_externos(symbol: str) -> None:
+    """
+    Cerrar en la DB las posiciones que un stop nativo liquidó con el bot muerto.
+
+    No se adivina cuál posición: se consulta el historial de órdenes filtrando
+    por nuestro orderLinkId, lo que da el position_id exacto y el precio de fill
+    real. Si no se encuentra el fill (blackout de más de 7 días, el máximo que
+    Bybit guarda), se avisa para cerrar a mano en vez de inventar un precio.
+
+    Este es el hueco que _sweep_dust no cubre: solo maneja el caso sobrante.
+    """
+    posiciones = [dict(p) for p in db.get_open_positions(symbol)]
+    if not posiciones:
+        return
+
+    base_asset = symbol.replace("USDT", "")
+    balance = exchange.get_balance(base_asset)
+    tracked = sum(p["qty"] for p in posiciones)
+    price = exchange.get_price(symbol)
+
+    if not native_stops.falta_balance(
+            tracked, balance, price, config.risk.dust_threshold_usdt):
+        return
+
+    logger.warning(
+        f"{symbol}: balance {balance:.8f} < registrado {tracked:.8f} — "
+        f"buscando cierres externos")
+
+    llenadas = exchange.get_filled_stop_orders(symbol)
+    por_id = {}
+    for orden in llenadas:
+        pos_id = native_stops.parse_position_id(orden.get("orderLinkId") or "")
+        if pos_id is not None:
+            por_id[pos_id] = orden
+
+    abiertas = {p["id"]: p for p in posiciones}
+    encontradas = 0
+
+    for pos_id, orden in por_id.items():
+        pos = abiertas.get(pos_id)
+        if pos is None:
+            continue
+
+        fill_price = float(orden.get("avgPrice") or 0)
+        qty = float(orden.get("cumExecQty") or 0) or pos["qty"]
+        if fill_price <= 0:
+            continue
+
+        pnl_usdt = (fill_price - pos["entry_price"]) * qty
+        pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
+        db.close_position(pos_id, fill_price, pnl_usdt, pnl_pct, "native_stop")
+        encontradas += 1
+
+        notifier.send_sync(
+            f"🛡 <b>Stop nativo ejecutado</b> {symbol}\n"
+            f"Posición #{pos_id} cerrada a ${fill_price:,.2f}\n"
+            f"P&L: ${pnl_usdt:+.2f} ({pnl_pct:+.2%})\n"
+            f"<i>Se ejecutó en el exchange, probablemente con el bot caído.</i>")
+        logger.info(
+            f"{symbol}: posición #{pos_id} cerrada por stop nativo a {fill_price}")
+
+    if encontradas == 0:
+        notifier.send_sync(
+            f"⚠️ <b>Descuadre de balance</b> {symbol}\n"
+            f"Registrado {tracked:.8f}, disponible {balance:.8f}, y no se "
+            f"encontró la orden que lo explique.\n"
+            f"<i>Revisar a mano — no se inventa un precio de cierre.</i>")
+        logger.error(
+            f"{symbol}: descuadre sin orden que lo explique "
+            f"(tracked={tracked}, balance={balance})")
+
+
 def reconcile(symbols: Optional[List[str]] = None) -> None:
     """
     Converger las órdenes condicionales del exchange con las posiciones abiertas.
@@ -63,6 +135,8 @@ def reconcile(symbols: Optional[List[str]] = None) -> None:
 
     for symbol in objetivo:
         try:
+            detectar_cierres_externos(symbol)
+
             posiciones = [dict(p) for p in db.get_open_positions(symbol)]
             precios = {symbol: exchange.get_price(symbol)}
 
