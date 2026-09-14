@@ -52,23 +52,39 @@ ExecStart=/opt/dcabot/venv/bin/python /opt/dcabot/bot.py
 Restart=always
 RestartSec=15
 
-# SIN rate limit de arranque, deliberadamente.
+# SIN rate limit de arranque, deliberadamente. Revisado en v2.19.
 #
 # Hasta v2.17 esto era `StartLimitIntervalSec=600` + `StartLimitBurst=5` en
 # [Service] — donde systemd las IGNORA en silencio ("Unknown key name ...
-# in section 'Service', ignoring"), dejando el default de 10s. O sea: nunca
-# estuvieron activas. Moverlas a [Unit] las activaría de verdad, y ahí está
-# el problema: con RestartSec=15, cinco reinicios ocurren en 75s, bien
-# dentro de la ventana de 600s → systemd se rinde y deja el bot muerto en
-# silencio. Eso es exactamente el modo de falla de junio.
+# in section 'Service', ignoring"). Nunca estuvieron activas.
 #
-# El limitador protege contra crash-loops apretados, pero RestartSec=15 ya
-# acota a 4 intentos/min (inofensivo para Bybit y Telegram). Con posiciones
-# abiertas sin vigilancia, morir en silencio es mucho peor que reintentar.
+# Queda activo el default de systemd (StartLimitIntervalSec=10s, Burst=5),
+# que es inalcanzable: con RestartSec=15 cinco reinicios tardan 60s y nunca
+# caben en una ventana de 10s. En la práctica: reintentos ilimitados.
 #
-# Reintroducirlo SOLO cuando exista alerta de caída (deadman externo que
-# vigile bot_state.last_scan_time); ahí un `OnFailure=` avisaría en vez de
-# fallar callado.
+# v2.17.1 dejó anotado "reintroducirlo cuando exista un deadman externo".
+# El deadman existe desde v2.18 y está validado end-to-end. Revisado con esa
+# pieza en mano, la conclusión CAMBIA: el límite sigue siendo mala idea.
+#
+#   falla                  sin límite (hoy)         con límite de 600s
+#   crash transitorio      reintenta, se auto-cura  5 intentos -> muerto
+#   crash permanente       reintenta; alerta ~30min muerto; alerta ~30min
+#   cuelgue / host caído   alerta ~30min            alerta ~30min
+#
+# El deadman iguala la DETECCIÓN en los tres casos, así que el límite solo
+# cambia el primero — y lo empeora, convirtiendo un estado que se auto-cura
+# en uno terminal. A cambio evita 4 reintentos/min, irrelevante para Bybit
+# y Telegram.
+#
+# `OnFailure=` tampoco es alternativa: con Restart=always el unit nunca entra
+# en estado `failed` salvo que el límite se dispare, así que OnFailure está
+# acoplado al límite. No se puede tener uno sin el otro.
+#
+# El riesgo de fondo NO es el arranque: los stop-loss son del lado del bot
+# (`_check_stop_losses`), no órdenes nativas en el exchange, así que la
+# vigilancia de riesgo depende de que el proceso esté vivo. Esa es la causa
+# real del costo del blackout de junio, y la mitigación de verdad son stops
+# nativos en Bybit — no un limitador de arranque.
 
 # Endurecimiento básico (no afecta la lógica de trading)
 NoNewPrivileges=true

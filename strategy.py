@@ -8,6 +8,7 @@ import requests
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Optional
+import sell_rules
 from config import config
 from database import db
 
@@ -540,21 +541,14 @@ class Strategy:
         return round(amount, 2)
 
     def calc_sell_qty(self, sell_score: int, position_qty: float) -> float:
-        """Calculate how much to sell based on sell score."""
-        SC = config.scoring
+        """
+        Calculate how much to sell based on sell score.
 
-        if sell_score >= SC.sell_total:
-            pct = SC.sell_total_pct
-        elif sell_score >= SC.sell_strong:
-            pct = SC.sell_strong_pct
-        elif sell_score >= SC.sell_moderate:
-            pct = SC.sell_moderate_pct
-        elif sell_score >= SC.sell_partial:
-            pct = SC.sell_partial_pct
-        else:
-            return 0
-
-        return position_qty * pct
+        v2.19 — la implementación vive en `sell_rules`, el núcleo puro que
+        comparten bot.py y backtest.py. Este delegado se mantiene para los
+        callers existentes.
+        """
+        return sell_rules.calc_sell_qty(sell_score, position_qty)
 
     # ═══════════════════════════════════════
     # TECHNICAL INDICATOR HELPERS

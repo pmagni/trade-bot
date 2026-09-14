@@ -314,6 +314,23 @@ class SellGuardConfig:
 
 
 @dataclass
+class NativeStopsConfig:
+    """
+    v2.20 — Stops nativos en Bybit: una orden condicional de venta por posición,
+    colocada POR DEBAJO del stop del bot. Red de seguridad, no espejo: con el bot
+    vivo su propio stop dispara primero y el comportamiento es el de siempre.
+
+    Existe porque todos los stop-loss son del lado del bot (`_check_stop_losses`),
+    así que la vigilancia de riesgo depende de que el proceso esté vivo. Esa es la
+    causa del costo del blackout de jun-2026 (-$4.53 en dos posiciones ETH).
+
+    enabled_symbols vacío = apagado. El rollout es por canario: BNBUSDT primero.
+    """
+    enabled_symbols: list = field(default_factory=list)
+    margin_pct: float = 0.015   # el nativo va 1.5% bajo el stop del bot
+
+
+@dataclass
 class KeyLevelsConfig:
     """Manual key support/resistance levels per asset (multi-tier).
     Each asset has lists of supports/resistances with price, label, and score_bonus.
@@ -406,6 +423,7 @@ class Config:
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
     sell_guard: SellGuardConfig = field(default_factory=SellGuardConfig)
+    native_stops: NativeStopsConfig = field(default_factory=NativeStopsConfig)
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     regime: RegimeConfig = field(default_factory=RegimeConfig)
     crash_detector: CrashDetectorConfig = field(default_factory=CrashDetectorConfig)

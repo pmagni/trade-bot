@@ -13,6 +13,8 @@ from logging.handlers import RotatingFileHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram.ext import Application
 
+import sell_rules
+import native_stops_shell
 from config import config
 from database import db
 from exchange import exchange
@@ -166,22 +168,24 @@ class SwingBot:
                     else:
                         signals["buy_action"] = "Score too low"
 
+                    # v2.20 — Reconciliar stops nativos antes de decidir ventas,
+                    # para que la DB sea verdadera cuando el bot decide. Si un
+                    # stop nativo cerró la posición, el bot tiene que saberlo
+                    # antes de intentar venderla.
+                    native_stops_shell.reconcile([symbol])
+
                     # Execute sell if score is high enough
                     if signals["sell_score"] >= config.scoring.sell_partial:
                         # v2.17 — Paridad con el path de compra (propuesto, OFF por
                         # defecto — ver SellGuardConfig): no vender justo sobre un
                         # soporte clave, espejo del check de resistencia en compra.
-                        near_support = False
-                        if config.sell_guard.near_support_gate_enabled:
-                            kl = db.get_effective_levels(symbol)
-                            for s in kl.get("supports", []):
-                                dist = abs(signals["indicators"]["price"] - s["price"]) / s["price"]
-                                if dist <= config.key_levels.tolerance_pct:
-                                    near_support = True
-                                    signals["sell_action"] = f"Blocked: near support {s['label']} ${s['price']:,.0f}"
-                                    logger.info(f"{symbol}: Sell blocked — price near support {s['label']}")
-                                    break
-                        if not near_support:
+                        kl = db.get_effective_levels(symbol)
+                        near_support, gate_reason = sell_rules.near_support_block(
+                            signals["indicators"]["price"], kl.get("supports", []))
+                        if near_support:
+                            signals["sell_action"] = f"Blocked: {gate_reason}"
+                            logger.info(f"{symbol}: Sell blocked — {gate_reason}")
+                        else:
                             sold = await self._execute_sell(symbol, signals)
                             signals["sell_action"] = "SOLD" if sold else "Blocked (no position / cooldown)"
                     elif signals["sell_score"] > 0:
@@ -419,6 +423,12 @@ class SwingBot:
             # Block sells for min_hold_minutes to prevent instant buy-sell cycles
             db.set_cooldown(symbol, "sell", config.risk.min_hold_minutes)
 
+            # v2.20 — Colocar la red de seguridad ya, sin esperar al próximo
+            # scan: si el bot muere en los próximos 15 min, la posición recién
+            # comprada quedaría sin protección. Misma función que el scan, no
+            # un camino paralelo.
+            native_stops_shell.reconcile([symbol])
+
             alert = notifier.format_buy_alert(
                 symbol, fill_price, fill_value, buy_score,
                 signals["buy_details"], sl_price
@@ -453,30 +463,19 @@ class SwingBot:
 
         for pos in open_positions:
             try:
-                sell_qty = strategy.calc_sell_qty(sell_score, pos["qty"])
-                if sell_qty <= 0:
+                # v2.19 — la decisión (cuánto, por qué, runner) vive en
+                # sell_rules, compartida con backtest.py. Acá queda solo la
+                # ejecución: orden, DB, notificación.
+                plan = sell_rules.plan_sell(
+                    sell_score, signals["sell_details"], pos["qty"], price)
+                if plan is None:
                     continue
 
-                # Partial sell at resistance: sell 50%, keep runner with trailing stop
-                SC = config.scoring
-                at_resistance = "key_resistance" in signals["sell_details"]
-                if (at_resistance and SC.partial_sell_at_resistance
-                        and sell_score < SC.sell_strong):
-                    sell_qty = pos["qty"] * SC.partial_sell_pct
-                    close_reason = "partial_resistance"
-                    # Activate trailing stop on the runner
-                    runner_qty = pos["qty"] - sell_qty
-                    runner_trailing = price * (1 - config.risk.trailing_stop_distance)
-                else:
-                    runner_qty = 0
-                    close_reason = "signal_sell"
-
+                sell_qty = plan.qty
+                runner_qty = plan.runner_qty
+                runner_trailing = plan.runner_trailing
+                close_reason = plan.reason
                 sell_value = sell_qty * price
-                if sell_value < config.risk.min_order_usdt:
-                    sell_qty = pos["qty"]
-                    sell_value = sell_qty * price
-                    runner_qty = 0
-                    close_reason = "signal_sell"
 
                 if pos["trade_type"] == "futures":
                     result = exchange.close_futures_position(symbol)
@@ -491,7 +490,7 @@ class SwingBot:
                 pnl_usdt = (fill_price - pos["entry_price"]) * sell_qty
                 pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
 
-                if runner_qty > 0 and runner_qty * fill_price >= config.risk.min_order_usdt:
+                if sell_rules.runner_is_viable(runner_qty, fill_price):
                     # Close partial, keep runner with trailing stop
                     db.close_position(pos["id"], fill_price, pnl_usdt, pnl_pct, close_reason)
                     db.open_position(

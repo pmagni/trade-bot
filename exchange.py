@@ -6,6 +6,7 @@ Includes rate-limit throttling and retry logic.
 """
 
 import logging
+import math
 import time
 import threading
 from typing import Tuple
@@ -18,6 +19,9 @@ logger = logging.getLogger("exchange")
 MIN_REQUEST_INTERVAL = 0.25   # 250ms between API calls (max 4/sec)
 MAX_RETRIES = 3               # Retry up to 3 times on rate limit
 RETRY_BASE_DELAY = 2.0        # Exponential backoff base: 2s, 4s, 8s
+
+# ─── v2.20: stops nativos ───
+ORDER_HISTORY_LIMIT = 50      # límite de página de get_order_history
 
 
 def _safe_float(v) -> float:
@@ -198,6 +202,26 @@ class Exchange:
         except Exception:
             return 6  # Safe default
 
+    def get_price_precision(self, symbol: str) -> Tuple[int, float]:
+        """
+        Decimales de precio y tick size del símbolo (v2.20: stops nativos).
+
+        Espejo de `get_qty_precision`, pero leyendo `priceFilter.tickSize` en
+        vez del lot-size: Bybit rechaza cualquier orden condicional cuyo
+        triggerPrice no caiga exactamente en un múltiplo del tick.
+        """
+        try:
+            resp = self._call_with_retry(self.client.get_instruments_info, category="spot", symbol=symbol)
+            info = resp["result"]["list"][0]
+            tick_size = info.get("priceFilter", {}).get("tickSize", "0.01")
+            if "." in tick_size:
+                decimals = len(tick_size.split(".")[1].rstrip("0")) or 1
+            else:
+                decimals = 0
+            return decimals, float(tick_size)
+        except Exception:
+            return 2, 0.01  # Safe default
+
     def place_spot_market_buy(self, symbol: str, quote_amount: float) -> dict:
         """
         Place a spot market buy order using quote currency (USDT).
@@ -376,6 +400,107 @@ class Exchange:
         except Exception as e:
             logger.error(f"Error closing futures position for {symbol}: {e}")
             raise
+
+    # ─── v2.20: stops nativos ───
+
+    def place_spot_stop_order(self, symbol: str, qty: float,
+                              trigger_price: float, link_id: str) -> dict:
+        """
+        Orden condicional de venta spot (red de seguridad bajo el stop del bot).
+
+        orderFilter="StopOrder" es obligatorio y NO es intercambiable con
+        "tpslOrder": tpslOrder ocupa el activo base apenas se coloca, lo que
+        dejaría al bot sin poder vender. StopOrder no lo ocupa hasta el trigger.
+        """
+        precision = self.get_qty_precision(symbol)
+        factor = 10 ** precision
+        actual_qty = int(qty * factor) / factor
+        if actual_qty <= 0:
+            raise ValueError(f"Qty too small after truncation for {symbol}: {qty}")
+        qty_str = f"{actual_qty:.{precision}f}"
+
+        # Ajustar el trigger al tick del símbolo. Siempre hacia abajo (floor),
+        # nunca redondeando: redondear hacia arriba podría empujar el trigger
+        # por encima del stop del bot e invertir la red de seguridad.
+        price_decimals, tick_size = self.get_price_precision(symbol)
+        if tick_size > 0:
+            # Epsilon minúsculo para compensar el error de representación de
+            # floats (ej: 591.0 / 0.1 == 5909.999999999999) sin llegar nunca
+            # a redondear hacia arriba un valor que realmente cae abajo.
+            ticks = math.floor(trigger_price / tick_size + 1e-9)
+            snapped_price = ticks * tick_size
+        else:
+            snapped_price = trigger_price
+        price_str = f"{snapped_price:.{price_decimals}f}"
+
+        resp = self._call_with_retry(
+            self.client.place_order,
+            category="spot",
+            symbol=symbol,
+            side="Sell",
+            orderType="Market",
+            qty=qty_str,
+            orderFilter="StopOrder",
+            triggerPrice=price_str,
+            orderLinkId=link_id,
+        )
+        order_id = resp["result"]["orderId"]
+        logger.info(
+            f"STOP NATIVO {symbol}: {qty_str} @ trigger {price_str} "
+            f"({link_id}) order_id={order_id}")
+        return {"order_id": order_id}
+
+    def cancel_order(self, symbol: str, order_id: str) -> dict:
+        """Cancela una orden por id. Usado para converger stops nativos."""
+        resp = self._call_with_retry(
+            self.client.cancel_order,
+            category="spot",
+            symbol=symbol,
+            orderId=order_id,
+            orderFilter="StopOrder",
+        )
+        logger.info(f"Cancelada orden {order_id} de {symbol}")
+        return {"order_id": resp["result"]["orderId"]}
+
+    def get_open_stop_orders(self, symbol: str) -> list:
+        """Órdenes condicionales spot abiertas para el símbolo."""
+        resp = self._call_with_retry(
+            self.client.get_open_orders,
+            category="spot",
+            symbol=symbol,
+            orderFilter="StopOrder",
+        )
+        return resp["result"]["list"]
+
+    def get_filled_stop_orders(self, symbol: str, link_id_prefix: str = "nsl-",
+                               lookback_hours: int = 168) -> list:
+        """
+        Órdenes condicionales nuestras que ya se ejecutaron.
+
+        Sirve para reconstruir un cierre que ocurrió con el bot muerto: da el
+        position_id (en el orderLinkId) y el precio de fill real.
+
+        lookback_hours=168 (7 días) es el máximo que Bybit guarda de historial
+        spot. El blackout de jun-2026 duró 55h, así que entra con margen.
+        """
+        start_ms = int((time.time() - lookback_hours * 3600) * 1000)
+        resp = self._call_with_retry(
+            self.client.get_order_history,
+            category="spot",
+            symbol=symbol,
+            orderFilter="StopOrder",
+            startTime=start_ms,
+            limit=ORDER_HISTORY_LIMIT,
+        )
+        orders = resp["result"]["list"]
+        if len(orders) >= ORDER_HISTORY_LIMIT:
+            logger.warning(
+                f"get_filled_stop_orders {symbol}: la página de historial "
+                f"vino llena ({ORDER_HISTORY_LIMIT} en {lookback_hours}h), "
+                f"el resultado puede estar incompleto")
+        return [o for o in orders
+                if (o.get("orderLinkId") or "").startswith(link_id_prefix)
+                and o.get("orderStatus") == "Filled"]
 
     # ─── HEALTH CHECK ───
 
