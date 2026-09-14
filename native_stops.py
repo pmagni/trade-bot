@@ -16,7 +16,7 @@ testearse en el venv mínimo — mismo criterio que `monitoring.py` y `sell_rule
 import logging
 import math
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 logger = logging.getLogger("native_stops")
 
@@ -44,7 +44,8 @@ def desired_stops(
     prices: Dict[str, float],
     margin: float,
     enabled: List[str],
-) -> Dict[str, DesiredStop]:
+    now_ms: int,
+) -> Dict[int, DesiredStop]:
     """
     Estado deseado: qué órdenes condicionales deberían existir ahora.
 
@@ -56,6 +57,10 @@ def desired_stops(
     Dos invariantes de seguridad. Si una posición no los cumple, NO se emite
     nada para ella: quedarse sin red es preferible a colocar una trampa que
     venda una posición sana.
+
+    Retorna dict keyed by position_id (int). Cada DesiredStop lleva link_id
+    con timestamp para garantizar unicidad en el exchange y evitar collapsar
+    duplicados.
     """
     out = {}
 
@@ -89,8 +94,9 @@ def desired_stops(
                 f"{price} — sin stop nativo")
             continue
 
-        link_id = f"{LINK_PREFIX}{pos['id']}"
-        out[link_id] = DesiredStop(
+        pos_id = pos['id']
+        link_id = f"{LINK_PREFIX}{pos_id}-{now_ms}"
+        out[pos_id] = DesiredStop(
             link_id=link_id, symbol=symbol,
             qty=pos["qty"], trigger_price=trigger,
         )
@@ -110,38 +116,68 @@ def _misma(stop: DesiredStop, orden: dict) -> bool:
             and math.isclose(trigger, stop.trigger_price, rel_tol=1e-6))
 
 
-def reconcile_plan(desired: Dict[str, DesiredStop],
+def _parse_position_id(link_id: str) -> Optional[int]:
+    """Extrae position_id de un link_id con formato 'nsl-{pos_id}-{now_ms}'."""
+    if not link_id.startswith(LINK_PREFIX):
+        return None
+
+    parts = link_id.split('-')
+    # Esperamos: ['nsl', '{pos_id}', '{now_ms}']
+    if len(parts) != 3:
+        return None
+
+    try:
+        return int(parts[1])
+    except (IndexError, ValueError):
+        return None
+
+
+def reconcile_plan(desired: Dict[int, DesiredStop],
                    actual: List[dict]) -> ReconcilePlan:
     """
     Converger: colocar lo que falta, cancelar lo que sobra, recolocar lo que
     cambió. Cancelar y recolocar en vez de `amend` a propósito: una operación
     menos que puede fallar a la mitad, y el resultado es idempotente.
 
-    Solo se tocan órdenes cuyo orderLinkId empieza con LINK_PREFIX. Una orden
-    puesta a mano desde la app de Bybit no es asunto del bot.
+    Matching by position_id: parsea position_id de cada orderLinkId actual.
+    Solo se tocan órdenes cuyo orderLinkId empieza con LINK_PREFIX y tiene
+    un position_id parseable. Una orden puesta a mano desde la app de Bybit
+    no es asunto del bot.
+
+    Si hay múltiples órdenes actuales para el mismo position_id, se mantiene
+    la primera y se cancelan el resto como huérfanas.
 
     Un estado ya convergido produce un plan vacío. Eso es lo que hace seguro
-    correr esto en cada scan.
+    correr esto en cada scan, incluso si el now_ms cambió entre llamadas.
     """
     to_place = []
     to_cancel = []
 
+    # Mapear position_id -> orden, detectando y cancelando duplicados
     nuestras = {}
     for orden in actual:
         link_id = orden.get("orderLinkId") or ""
-        if link_id.startswith(LINK_PREFIX):
-            nuestras[link_id] = orden
+        pos_id = _parse_position_id(link_id)
 
-    for link_id, stop in desired.items():
-        orden = nuestras.get(link_id)
+        if pos_id is not None:
+            if pos_id not in nuestras:
+                nuestras[pos_id] = orden
+            else:
+                # Duplicado: mantener el primero, cancelar este
+                to_cancel.append(orden["orderId"])
+
+    # Comparar deseados contra actuales
+    for pos_id, stop in desired.items():
+        orden = nuestras.get(pos_id)
         if orden is None:
             to_place.append(stop)
         elif not _misma(stop, orden):
             to_cancel.append(orden["orderId"])
             to_place.append(stop)
 
-    for link_id, orden in nuestras.items():
-        if link_id not in desired:
+    # Cancelar órdenes nuestras que no están en el estado deseado
+    for pos_id, orden in nuestras.items():
+        if pos_id not in desired:
             to_cancel.append(orden["orderId"])
 
     return ReconcilePlan(to_place=to_place, to_cancel=to_cancel)
