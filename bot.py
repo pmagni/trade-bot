@@ -35,6 +35,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bot")
 
+# v2.20.1 — Silenciar librerías ruidosas.
+#
+# `httpx` loguea la URL completa de cada request en INFO, y la API de Telegram
+# lleva el token EN la URL: el journal quedaba con el bot token en texto plano
+# repetido en cada llamada (8157 líneas en 2 días). Cualquiera con acceso de
+# lectura a los logs del servidor lo tenía.
+#
+# De paso baja ~70% el volumen del log: httpx solo eran 8157 de ~11700 líneas,
+# y apscheduler anuncia cada job que ejecuta sin aportar nada.
+#
+# WARNING y no ERROR: si httpx falla de verdad queremos enterarnos.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
+logging.getLogger("apscheduler.scheduler").setLevel(logging.WARNING)
+
 # ─── SINGLE-INSTANCE GUARD ───
 # v2.17: previene el escenario de ago-2026 — un nohup/systemd restart dejó dos
 # procesos bot.py vivos simultáneamente, y ambos hicieron polling contra el
