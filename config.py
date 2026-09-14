@@ -326,7 +326,10 @@ class NativeStopsConfig:
 
     enabled_symbols vacío = apagado. El rollout es por canario: BNBUSDT primero.
     """
-    enabled_symbols: list = field(default_factory=list)
+    # Canario v2.20: solo BNBUSDT. Menor exposicion del universo
+    # (~$13/posicion, +$1.54 historico). ETH y BTC entran despues de una
+    # semana limpia, uno por semana: si algo sale mal, se sabe cual fue.
+    enabled_symbols: list = field(default_factory=lambda: ["BNBUSDT"])
     margin_pct: float = 0.015   # el nativo va 1.5% bajo el stop del bot
 
 
