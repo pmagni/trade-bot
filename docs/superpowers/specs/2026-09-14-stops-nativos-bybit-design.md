@@ -213,7 +213,7 @@ un restart se vuelve a avisar una vez, que es el comportamiento deseado.
 | modo de falla | mitigación | riesgo residual |
 |---|---|---|
 | stop colocado demasiado alto | los dos invariantes de `desired_stops` | ninguno si los tests pasan |
-| orden huérfana tras venta parcial | el reconciliador la corrige | 1 scan (15 min); benigno — solo dispara bajo el stop original, donde vender es correcto |
+| orden huérfana tras venta parcial | el reconciliador la corrige | 1 scan (15 min); NO es benigno — `_execute_sell` cierra la posición original y abre una segunda posición (el runner) para el mismo símbolo, así que la orden vieja (con la cantidad grande de antes de la venta) puede consumir el colateral del runner en vez de vender algo ya cerrado. El descuadre resultante se detecta vía la alerta de balance-mismatch (`falta_balance` / `detectar_cierres_externos`), no silenciosamente |
 | compra sin red hasta el próximo scan | reconciliar tras `_execute_buy` | segundos |
 | falso positivo de cierre externo | tolerancia de `dust_threshold_usdt` | ninguno |
 | bug que cancela órdenes válidas | degradación al comportamiento de hoy | vuelve al riesgo actual, no peor |
