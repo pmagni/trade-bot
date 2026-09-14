@@ -19,6 +19,9 @@ MIN_REQUEST_INTERVAL = 0.25   # 250ms between API calls (max 4/sec)
 MAX_RETRIES = 3               # Retry up to 3 times on rate limit
 RETRY_BASE_DELAY = 2.0        # Exponential backoff base: 2s, 4s, 8s
 
+# ─── v2.20: stops nativos ───
+ORDER_HISTORY_LIMIT = 50      # límite de página de get_order_history
+
 
 def _safe_float(v) -> float:
     """Parse float safely, returning 0.0 for None/empty/invalid."""
@@ -390,7 +393,10 @@ class Exchange:
         """
         precision = self.get_qty_precision(symbol)
         factor = 10 ** precision
-        qty_str = f"{int(qty * factor) / factor:.{precision}f}"
+        actual_qty = int(qty * factor) / factor
+        if actual_qty <= 0:
+            raise ValueError(f"Qty too small after truncation for {symbol}: {qty}")
+        qty_str = f"{actual_qty:.{precision}f}"
 
         resp = self._call_with_retry(
             self.client.place_order,
@@ -449,9 +455,15 @@ class Exchange:
             symbol=symbol,
             orderFilter="StopOrder",
             startTime=start_ms,
-            limit=50,
+            limit=ORDER_HISTORY_LIMIT,
         )
-        return [o for o in resp["result"]["list"]
+        orders = resp["result"]["list"]
+        if len(orders) >= ORDER_HISTORY_LIMIT:
+            logger.warning(
+                f"get_filled_stop_orders {symbol}: la página de historial "
+                f"vino llena ({ORDER_HISTORY_LIMIT} en {lookback_hours}h), "
+                f"el resultado puede estar incompleto")
+        return [o for o in orders
                 if (o.get("orderLinkId") or "").startswith(link_id_prefix)
                 and o.get("orderStatus") == "Filled"]
 
