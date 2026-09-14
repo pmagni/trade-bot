@@ -7,7 +7,7 @@ al instante y venda una posición sana. Quedarse sin red es preferible.
 
 import pytest
 
-from native_stops import DesiredStop, desired_stops
+from native_stops import DesiredStop, desired_stops, ReconcilePlan, reconcile_plan
 
 
 def _pos(pos_id=1, symbol="BNBUSDT", qty=0.02, stop_loss=600.0):
@@ -88,3 +88,77 @@ def test_varias_posiciones_del_mismo_simbolo():
                       PRECIOS, margin=0.015, enabled=["BNBUSDT"])
 
     assert set(d) == {"nsl-7", "nsl-9"}
+
+
+def _orden(link_id="nsl-1", order_id="abc123", qty="0.02", trigger="591.0"):
+    """Orden condicional abierta, con el shape crudo que devuelve Bybit."""
+    return {"orderId": order_id, "orderLinkId": link_id,
+            "qty": qty, "triggerPrice": trigger}
+
+
+def test_deseada_sin_orden_se_coloca():
+    d = desired_stops([_pos()], PRECIOS, margin=0.015, enabled=["BNBUSDT"])
+
+    plan = reconcile_plan(d, actual=[])
+
+    assert plan.to_place == [d["nsl-1"]]
+    assert plan.to_cancel == []
+
+
+def test_orden_sin_deseada_se_cancela():
+    """Posición ya cerrada: su orden quedó huérfana y hay que limpiarla."""
+    plan = reconcile_plan({}, actual=[_orden(order_id="huerfana")])
+
+    assert plan.to_place == []
+    assert plan.to_cancel == ["huerfana"]
+
+
+def test_estado_convergido_produce_plan_vacio():
+    """
+    LA propiedad que hace seguro correr esto cada 15 min. Si un estado ya
+    convergido generara actividad, el reconciliador cancelaría y recolocaría
+    en loop, gastando rate limit y dejando ventanas sin protección.
+    """
+    d = desired_stops([_pos()], PRECIOS, margin=0.015, enabled=["BNBUSDT"])
+    stop = d["nsl-1"]
+
+    plan = reconcile_plan(d, actual=[
+        _orden(link_id="nsl-1", qty=str(stop.qty), trigger=str(stop.trigger_price))])
+
+    assert plan == ReconcilePlan(to_place=[], to_cancel=[])
+
+
+def test_qty_distinta_se_recoloca():
+    """Tras una venta parcial la orden vieja cubre de más."""
+    d = desired_stops([_pos(qty=0.01)], PRECIOS, margin=0.015, enabled=["BNBUSDT"])
+
+    plan = reconcile_plan(d, actual=[
+        _orden(link_id="nsl-1", order_id="vieja", qty="0.02", trigger="591.0")])
+
+    assert plan.to_cancel == ["vieja"]
+    assert plan.to_place == [d["nsl-1"]]
+
+
+def test_trigger_distinto_se_recoloca():
+    d = desired_stops([_pos(stop_loss=610.0)], PRECIOS, margin=0.015,
+                      enabled=["BNBUSDT"])
+
+    plan = reconcile_plan(d, actual=[
+        _orden(link_id="nsl-1", order_id="vieja", qty="0.02", trigger="591.0")])
+
+    assert plan.to_cancel == ["vieja"]
+    assert plan.to_place == [d["nsl-1"]]
+
+
+def test_nunca_cancela_ordenes_ajenas():
+    """
+    El prefijo nsl- es la única marca de propiedad. Una orden colocada a mano
+    desde la app de Bybit NO puede ser cancelada por el bot.
+    """
+    plan = reconcile_plan({}, actual=[
+        _orden(link_id="mi-orden-manual", order_id="ajena"),
+        _orden(link_id="", order_id="sin-link"),
+    ])
+
+    assert plan.to_cancel == []
+    assert plan.to_place == []
