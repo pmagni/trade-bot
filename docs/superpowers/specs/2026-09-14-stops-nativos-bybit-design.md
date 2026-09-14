@@ -254,3 +254,35 @@ los −$4.53, se habrían evitado alrededor de $2.8.
 
 Sobre la operación normal: **ninguno**. Con el bot vivo el stop del bot siempre
 dispara primero, por construcción.
+
+## Despliegue del canario (2026-09-14)
+
+Desplegado a producción 12:46 UTC con `enabled_symbols = ["BNBUSDT"]`.
+
+Verificado post-restart: 0 errores, 0 tracebacks, scans completándose, 1 solo
+proceso. Sin posiciones abiertas al momento del despliegue, así que la ventana
+de restart tuvo exposición cero.
+
+Deadman (v2.18) confirmado sano en el mismo momento: último ping 4 minutos
+antes, dentro del período de 15.
+
+### Hallazgo colateral: el bot token de Telegram estaba en los logs
+
+Revisando el journal para verificar el arranque apareció que `httpx` loguea la
+URL completa de cada request en INFO, y la API de Telegram lleva el token EN la
+URL: 8157 líneas con el token en texto plano en 2 días. Preexistente, no
+introducido por v2.20.
+
+Resuelto en v2.20.1 por los dos lados: token rotado en BotFather (el ID del bot
+no cambia al revocar, solo la parte secreta) y `httpx`/`httpcore`/`apscheduler`
+silenciados a WARNING. Efecto secundario: ~70% menos volumen de log.
+
+El journal histórico todavía contiene el token viejo, ya inútil.
+
+### Checklist del canario — pendiente
+
+Los 5 puntos se verifican cuando el bot compre BNB por primera vez. El más
+importante es el 4 (idempotencia): en scans sin cambios de posición NO debe
+aparecer ninguna línea `Stops nativos BNBUSDT:`. Si aparece en cada scan, el
+reconciliador está cancelando y recolocando en loop — el único fallo que los
+tests no pueden confirmar contra el exchange real.
