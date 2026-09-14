@@ -83,8 +83,15 @@ def detect_external_closes(symbol: str) -> list: ...
 def place_spot_stop_order(symbol, qty, trigger_price, link_id) -> dict
 def cancel_order(symbol, order_id) -> dict
 def get_open_stop_orders(symbol) -> list
-def get_filled_stop_orders(symbol, link_id_prefix="nsl-") -> list
+def get_filled_stop_orders(symbol, link_id_prefix="nsl-", lookback_hours=168) -> list
 ```
+
+`lookback_hours` por defecto 168 (7 días): tiene que cubrir el peor blackout
+plausible con margen. El de junio duró 55h. Bybit limita el historial de órdenes
+spot a los últimos 7 días, así que 168h es también el máximo disponible — si un
+blackout superara eso, la posición se detecta igual por el faltante de balance,
+pero habría que cerrarla a mano porque no se puede recuperar el precio de fill.
+Ese caso se loguea en ERROR y se avisa por Telegram en vez de adivinar un precio.
 
 Deliberadamente finos: traducción de parámetros y nada de lógica, porque esta
 capa no va a tener tests (ver Testing).
@@ -168,8 +175,12 @@ No se adivina cuál: se consulta el historial de órdenes filtrando por
 de fill real. Se cierra en la DB con ese dato.
 
 La tolerancia es necesaria porque Bybit cobra fees en el activo base y el
-balance siempre queda levemente por debajo de lo registrado. Se usa el mismo
-`dust_threshold_usdt` que ya usa `_sweep_dust`.
+balance siempre queda levemente por debajo de lo registrado.
+
+Unidades: el faltante se compara **en USDT**, no en cantidad de base. Es decir
+`(tracked_qty − balance) × precio_actual > config.risk.dust_threshold_usdt`. La
+comparación tiene que ser en USDT porque `dust_threshold_usdt` lo es, y porque
+una misma cantidad de base significa cosas muy distintas en BTC y en BNB.
 
 Este es el hueco que `_sweep_dust` no cubre: solo maneja el caso sobrante
 (`balance > tracked`), nunca el faltante.
@@ -178,8 +189,13 @@ Este es el hueco que `_sweep_dust` no cubre: solo maneja el caso sobrante
 
 **Regla de oro:** un fallo en los stops nativos nunca se propaga al loop de
 trading. Todo el reconciliador va envuelto en try/except; si la API falla, se
-loguea, se avisa una vez por Telegram, y se reintenta en el próximo scan. Como
-es idempotente, el reintento es gratis. Misma regla que `monitoring.heartbeat`.
+loguea y se reintenta en el próximo scan. Como es idempotente, el reintento es
+gratis. Misma regla que `monitoring.heartbeat`.
+
+La alerta a Telegram se manda **al entrar en estado de fallo y al salir**, no en
+cada scan: si no, una caída de la API de Bybit generaría un mensaje cada 15
+minutos. El estado se guarda en memoria del proceso (un bool por símbolo); tras
+un restart se vuelve a avisar una vez, que es el comportamiento deseado.
 
 | modo de falla | mitigación | riesgo residual |
 |---|---|---|
