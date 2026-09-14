@@ -8,7 +8,7 @@ al instante y venda una posición sana. Quedarse sin red es preferible.
 import pytest
 
 from native_stops import (DesiredStop, desired_stops, ReconcilePlan, reconcile_plan,
-                          falta_balance, parse_position_id)
+                          falta_balance, parse_position_id, fill_incompleto)
 
 
 def _pos(pos_id=1, symbol="BNBUSDT", qty=0.02, stop_loss=600.0):
@@ -265,3 +265,29 @@ def test_parse_position_id():
     assert parse_position_id("nsl-42") is None        # formato viejo, ya no válido
     assert parse_position_id("otra-cosa-123") is None
     assert parse_position_id("") is None
+
+
+def test_fill_incompleto_detecta_ejecucion_parcial():
+    """Se vendió la mitad de lo registrado: fill parcial."""
+    assert fill_incompleto(recorded_qty=1.0, executed_qty=0.5) is True
+
+
+def test_fill_incompleto_tolera_diferencias_de_redondeo():
+    """
+    recorded_qty (DB) y executed_qty (fill de Bybit) vienen de fuentes
+    distintas y difieren en el último decimal. No es un fill parcial real.
+    """
+    assert fill_incompleto(recorded_qty=1.0, executed_qty=0.9999) is False
+
+
+def test_fill_incompleto_ejecutado_ausente_no_cuenta():
+    """
+    executed_qty=0 significa que Bybit no reportó cumExecQty (dato ausente),
+    no un fill parcial de tamaño cero. La cáscara asume cierre completo en
+    ese caso, así que acá no debe marcarse como incompleto.
+    """
+    assert fill_incompleto(recorded_qty=1.0, executed_qty=0.0) is False
+
+
+def test_fill_incompleto_ejecucion_completa():
+    assert fill_incompleto(recorded_qty=0.5, executed_qty=0.5) is False

@@ -205,3 +205,25 @@ def falta_balance(tracked_qty: float, balance: float, price: float,
     if faltante <= 0:
         return False
     return faltante * price > dust_threshold
+
+
+def fill_incompleto(recorded_qty: float, executed_qty: float,
+                    rel_tol: float = 1e-3) -> bool:
+    """
+    ¿El fill de la orden cubrió menos cantidad de la que la posición tiene
+    registrada? Pasa con un book delgado en una orden de mercado: el stop
+    nativo vendió una parte y el resto quedó en la wallet.
+
+    Tolerancia relativa (no igualdad exacta) porque `recorded_qty` y
+    `executed_qty` vienen de fuentes distintas (la DB del bot vs el fill
+    reportado por Bybit) y difieren en el último decimal por redondeo.
+
+    `executed_qty <= 0` no cuenta como fill incompleto acá: eso significa que
+    el exchange no reportó `cumExecQty` (dato ausente, no un fill parcial de
+    tamaño cero) y la cáscara ya trata ese caso como "asumir cierre completo".
+    """
+    if executed_qty <= 0:
+        return False
+    if math.isclose(executed_qty, recorded_qty, rel_tol=rel_tol):
+        return False
+    return executed_qty < recorded_qty

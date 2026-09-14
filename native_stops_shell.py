@@ -88,6 +88,7 @@ def detectar_cierres_externos(symbol: str) -> None:
 
     abiertas = {p["id"]: p for p in posiciones}
     encontradas = 0
+    sin_precio = []  # position_id de órdenes encontradas pero con fill_price inválido
 
     for pos_id, orden in por_id.items():
         pos = abiertas.get(pos_id)
@@ -95,9 +96,34 @@ def detectar_cierres_externos(symbol: str) -> None:
             continue
 
         fill_price = float(orden.get("avgPrice") or 0)
-        qty = float(orden.get("cumExecQty") or 0) or pos["qty"]
         if fill_price <= 0:
+            # No se inventa un precio: la posición queda abierta, pero hay
+            # que avisar — si no, nadie se entera de que quedó sin cerrar.
+            sin_precio.append((pos_id, orden.get("orderId") or "?"))
             continue
+
+        recorded_qty = pos["qty"]
+        executed_qty = float(orden.get("cumExecQty") or 0)
+        qty = executed_qty or recorded_qty
+
+        if native_stops.fill_incompleto(recorded_qty, executed_qty):
+            # Ruling: no reabrir el remanente como posición nueva acá — ese
+            # path de escritura a la DB no se puede testear sin mock del
+            # exchange, y el riesgo de una posición fantasma o doble conteo
+            # es peor que el problema (el remanente sigue en la wallet y
+            # _sweep_dust lo recoge). Lo que no puede ser es silencioso.
+            logger.error(
+                f"{symbol}: posición #{pos_id} — fill parcial: ejecutado "
+                f"{executed_qty:.8f} de {recorded_qty:.8f} registrado, "
+                f"precio ${fill_price:,.2f}. Se cierra la posición completa "
+                f"pero el P&L solo cubre lo ejecutado — reconciliar a mano.")
+            notifier.send_sync(
+                f"⚠️ <b>Fill parcial en stop nativo</b> {symbol}\n"
+                f"Posición #{pos_id}: ejecutado {executed_qty:.8f} de "
+                f"{recorded_qty:.8f} registrado, a ${fill_price:,.2f}\n"
+                f"<i>Se cierra la posición pero el P&L registrado solo cubre "
+                f"la parte ejecutada. El remanente queda en la wallet y lo "
+                f"recoge _sweep_dust — reconciliar el P&L a mano.</i>")
 
         pnl_usdt = (fill_price - pos["entry_price"]) * qty
         pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
@@ -112,7 +138,18 @@ def detectar_cierres_externos(symbol: str) -> None:
         logger.info(
             f"{symbol}: posición #{pos_id} cerrada por stop nativo a {fill_price}")
 
-    if encontradas == 0:
+    if sin_precio:
+        detalle = ", ".join(f"#{pos_id} (orden {order_id})" for pos_id, order_id in sin_precio)
+        notifier.send_sync(
+            f"⚠️ <b>Orden sin precio de fill</b> {symbol}\n"
+            f"Se encontró la orden que cerró estas posiciones pero sin "
+            f"avgPrice válido: {detalle}\n"
+            f"<i>Quedan abiertas — no se inventa un precio. Revisar a mano.</i>")
+        logger.error(
+            f"{symbol}: órdenes encontradas sin fill_price válido, "
+            f"posiciones sin cerrar: {detalle}")
+
+    if encontradas == 0 and not sin_precio:
         notifier.send_sync(
             f"⚠️ <b>Descuadre de balance</b> {symbol}\n"
             f"Registrado {tracked:.8f}, disponible {balance:.8f}, y no se "
