@@ -14,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram.ext import Application
 
 import sell_rules
+import native_stops_shell
 from config import config
 from database import db
 from exchange import exchange
@@ -166,6 +167,12 @@ class SwingBot:
                         )
                     else:
                         signals["buy_action"] = "Score too low"
+
+                    # v2.20 — Reconciliar stops nativos antes de decidir ventas,
+                    # para que la DB sea verdadera cuando el bot decide. Si un
+                    # stop nativo cerró la posición, el bot tiene que saberlo
+                    # antes de intentar venderla.
+                    native_stops_shell.reconcile([symbol])
 
                     # Execute sell if score is high enough
                     if signals["sell_score"] >= config.scoring.sell_partial:
@@ -415,6 +422,12 @@ class SwingBot:
             risk_manager.set_buy_cooldown(symbol)
             # Block sells for min_hold_minutes to prevent instant buy-sell cycles
             db.set_cooldown(symbol, "sell", config.risk.min_hold_minutes)
+
+            # v2.20 — Colocar la red de seguridad ya, sin esperar al próximo
+            # scan: si el bot muere en los próximos 15 min, la posición recién
+            # comprada quedaría sin protección. Misma función que el scan, no
+            # un camino paralelo.
+            native_stops_shell.reconcile([symbol])
 
             alert = notifier.format_buy_alert(
                 symbol, fill_price, fill_value, buy_score,
