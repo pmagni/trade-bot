@@ -25,6 +25,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+import sell_rules
 from config import config
 from strategy import Strategy
 
@@ -53,6 +54,9 @@ class BacktestSim:
         # Anular dependencias externas: niveles clave y Fear&Greed
         import strategy as strategy_module
         strategy_module.db.get_effective_levels = lambda s: {}
+        # Misma fuente de niveles que usa bot.py, ya anulada arriba: el harness
+        # consulta por el mismo camino aunque la respuesta sea vacía.
+        self._levels = strategy_module.db.get_effective_levels
         self.strategy._get_fear_greed = lambda: None
 
         self.usdt = START_USDT
@@ -228,19 +232,32 @@ class BacktestSim:
                 in_uptrend = self.strategy.regime_is_uptrend(ind)
 
                 # ── SELL por señal ──
+                # v2.19 — mismo gate y misma decisión que bot.py, vía sell_rules.
+                # min_hold NO se chequea por edad de posición: producción lo
+                # implementa como cooldown de venta a nivel símbolo, seteado al
+                # comprar (ver el bloque BUY más abajo y bot.py:_execute_buy).
                 if sell_score >= config.scoring.sell_partial and open_pos \
                         and not self._on_cooldown(sym, "sell", ts):
-                    for pos in list(open_pos):
-                        if ts - pos["ts"] < config.risk.min_hold_minutes * 60_000:
-                            continue
-                        qty = self.strategy.calc_sell_qty(sell_score, pos["qty"])
-                        if qty <= 0:
-                            continue
-                        if qty * price < config.risk.min_order_usdt:
-                            qty = pos["qty"]
-                        frac = qty / pos["qty"]
-                        self._close_position(sym, pos, price, "signal_sell", ts, frac)
-                    self._set_cooldown(sym, "sell", config.risk.cooldown_after_sell, ts)
+                    supports = self._levels(sym).get("supports", [])
+                    blocked, _ = sell_rules.near_support_block(price, supports)
+                    if not blocked:
+                        for pos in list(open_pos):
+                            plan = sell_rules.plan_sell(
+                                sell_score, sell_details, pos["qty"], price)
+                            if plan is None:
+                                continue
+                            runner_ok = sell_rules.runner_is_viable(plan.runner_qty, price)
+                            reason = plan.reason
+                            if plan.runner_qty > 0 and not runner_ok:
+                                # Runner bajo el mínimo de orden: el resto queda
+                                # abierto pero sin trailing (igual que bot.py).
+                                reason = "partial_sell"
+                            frac = plan.qty / pos["qty"]
+                            self._close_position(sym, pos, price, reason, ts, frac)
+                            if runner_ok:
+                                pos["trailing_stop"] = plan.runner_trailing
+                                pos["trailing_max"] = price
+                        self._set_cooldown(sym, "sell", config.risk.cooldown_after_sell, ts)
 
                 # ── BUY por señal ──
                 buy_threshold = config.scoring.buy_light
@@ -289,6 +306,13 @@ class BacktestSim:
                                 "entry_details": buy_details,
                             })
                             self._set_cooldown(sym, "buy", config.risk.cooldown_after_buy, ts)
+                            # v2.19 — paridad con bot.py:_execute_buy: la compra
+                            # bloquea ventas del símbolo por min_hold_minutes.
+                            # Antes el harness chequeaba la edad de cada posición,
+                            # lo que permitía vender posiciones viejas que en
+                            # producción quedaban bloqueadas por la compra nueva.
+                            self._set_cooldown(sym, "sell",
+                                               config.risk.min_hold_minutes, ts)
 
             self.equity_curve.append((ts, self._total_value(prices_close)))
 
