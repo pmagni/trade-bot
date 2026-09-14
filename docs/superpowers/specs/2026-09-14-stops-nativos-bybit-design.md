@@ -68,14 +68,27 @@ class ReconcilePlan:
     to_place: list      # list[DesiredStop]
     to_cancel: list     # list[str] — order_ids del exchange
 
-def desired_stops(positions: list, prices: dict, margin: float) -> dict: ...
-def reconcile_plan(desired: dict, actual: list) -> ReconcilePlan: ...
-def apply(plan: ReconcilePlan) -> None: ...        # única parte con I/O
-def detect_external_closes(symbol: str) -> list: ...
+def desired_stops(positions, prices, margin, enabled) -> Dict[str, DesiredStop]
+def reconcile_plan(desired, actual) -> ReconcilePlan
+def falta_balance(tracked_qty, balance, price, dust_threshold) -> bool
+def position_id_de_link(link_id) -> Optional[int]
 ```
 
-`desired_stops` y `reconcile_plan` son puras y llevan tests. `apply` y
-`detect_external_closes` son la cáscara.
+Las cuatro son puras y llevan tests.
+
+### `native_stops_shell.py` (nuevo)
+
+La cáscara imperativa, en un módulo **aparte**. Así `native_stops.py` conserva
+su pureza y se sigue importando en el venv mínimo; si la cáscara viviera en el
+mismo archivo, importarlo arrastraría `database`, `exchange` y `notifications`
+y los tests dejarían de correr sin la stack completa.
+
+```python
+def reconcile(symbols: Optional[List[str]] = None) -> None
+def detectar_cierres_externos(symbol: str) -> None
+```
+
+`reconcile` nunca lanza excepción.
 
 ### `exchange.py` — cuatro wrappers nuevos
 
