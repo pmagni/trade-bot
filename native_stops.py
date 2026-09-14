@@ -69,6 +69,14 @@ def desired_stops(
         if symbol not in enabled:
             continue
 
+        # Solo spot: una posición futures no tiene el activo base en la
+        # wallet spot, así que una orden condicional spot para ella fallaría
+        # o, peor, infla tracked_qty en el chequeo de balance produciendo un
+        # falso falta_balance. Campo ausente = spot, por compatibilidad con
+        # filas existentes de antes de que trade_type existiera.
+        if pos.get("trade_type", "spot") != "spot":
+            continue
+
         stop_loss = pos.get("stop_loss") or 0
         if stop_loss <= 0:
             continue
@@ -104,15 +112,37 @@ def desired_stops(
     return out
 
 
+def _truncar_a_decimales(valor: float, ejemplo: str) -> float:
+    """
+    Trunca `valor` a la cantidad de decimales que tiene `ejemplo` (un string
+    tipo "0.0115"). `place_spot_stop_order` trunca la qty al colocar la orden,
+    así que el exchange siempre reporta menos decimales que el valor crudo de
+    la DB — comparar sin truncar el mismo modo hace que la comparación nunca
+    empate y el reconciliador cancele y recoloque en cada scan.
+    """
+    if "." in ejemplo:
+        decimales = len(ejemplo.split(".")[1])
+    else:
+        decimales = 0
+    factor = 10 ** decimales
+    return int(valor * factor) / factor
+
+
 def _misma(stop: DesiredStop, orden: dict) -> bool:
     """¿La orden existente ya es la deseada? Tolerancia relativa por floats."""
+    qty_str = orden.get("qty") or "0"
     try:
-        qty = float(orden.get("qty") or 0)
+        qty = float(qty_str)
         trigger = float(orden.get("triggerPrice") or 0)
     except (TypeError, ValueError):
         return False
 
-    return (math.isclose(qty, stop.qty, rel_tol=1e-6)
+    # La qty deseada viene de la DB sin truncar; la del exchange ya está
+    # truncada a la precisión base del símbolo al colocarse. Truncar acá al
+    # mismo número de decimales antes de comparar.
+    qty_deseada = _truncar_a_decimales(stop.qty, str(qty_str))
+
+    return (math.isclose(qty, qty_deseada, rel_tol=1e-6)
             and math.isclose(trigger, stop.trigger_price, rel_tol=1e-6))
 
 

@@ -6,6 +6,7 @@ Includes rate-limit throttling and retry logic.
 """
 
 import logging
+import math
 import time
 import threading
 from typing import Tuple
@@ -200,6 +201,26 @@ class Exchange:
             return 0
         except Exception:
             return 6  # Safe default
+
+    def get_price_precision(self, symbol: str) -> Tuple[int, float]:
+        """
+        Decimales de precio y tick size del símbolo (v2.20: stops nativos).
+
+        Espejo de `get_qty_precision`, pero leyendo `priceFilter.tickSize` en
+        vez del lot-size: Bybit rechaza cualquier orden condicional cuyo
+        triggerPrice no caiga exactamente en un múltiplo del tick.
+        """
+        try:
+            resp = self._call_with_retry(self.client.get_instruments_info, category="spot", symbol=symbol)
+            info = resp["result"]["list"][0]
+            tick_size = info.get("priceFilter", {}).get("tickSize", "0.01")
+            if "." in tick_size:
+                decimals = len(tick_size.split(".")[1].rstrip("0")) or 1
+            else:
+                decimals = 0
+            return decimals, float(tick_size)
+        except Exception:
+            return 2, 0.01  # Safe default
 
     def place_spot_market_buy(self, symbol: str, quote_amount: float) -> dict:
         """
@@ -398,6 +419,20 @@ class Exchange:
             raise ValueError(f"Qty too small after truncation for {symbol}: {qty}")
         qty_str = f"{actual_qty:.{precision}f}"
 
+        # Ajustar el trigger al tick del símbolo. Siempre hacia abajo (floor),
+        # nunca redondeando: redondear hacia arriba podría empujar el trigger
+        # por encima del stop del bot e invertir la red de seguridad.
+        price_decimals, tick_size = self.get_price_precision(symbol)
+        if tick_size > 0:
+            # Epsilon minúsculo para compensar el error de representación de
+            # floats (ej: 591.0 / 0.1 == 5909.999999999999) sin llegar nunca
+            # a redondear hacia arriba un valor que realmente cae abajo.
+            ticks = math.floor(trigger_price / tick_size + 1e-9)
+            snapped_price = ticks * tick_size
+        else:
+            snapped_price = trigger_price
+        price_str = f"{snapped_price:.{price_decimals}f}"
+
         resp = self._call_with_retry(
             self.client.place_order,
             category="spot",
@@ -406,12 +441,12 @@ class Exchange:
             orderType="Market",
             qty=qty_str,
             orderFilter="StopOrder",
-            triggerPrice=f"{trigger_price:.8f}".rstrip("0").rstrip("."),
+            triggerPrice=price_str,
             orderLinkId=link_id,
         )
         order_id = resp["result"]["orderId"]
         logger.info(
-            f"STOP NATIVO {symbol}: {qty_str} @ trigger {trigger_price:.4f} "
+            f"STOP NATIVO {symbol}: {qty_str} @ trigger {price_str} "
             f"({link_id}) order_id={order_id}")
         return {"order_id": order_id}
 

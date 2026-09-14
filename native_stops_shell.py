@@ -117,6 +117,18 @@ def detectar_cierres_externos(symbol: str) -> None:
                 f"{executed_qty:.8f} de {recorded_qty:.8f} registrado, "
                 f"precio ${fill_price:,.2f}. Se cierra la posición completa "
                 f"pero el P&L solo cubre lo ejecutado — reconciliar a mano.")
+
+        pnl_usdt = (fill_price - pos["entry_price"]) * qty
+        pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
+        db.close_position(pos_id, fill_price, pnl_usdt, pnl_pct, "native_stop")
+        encontradas += 1
+
+        if native_stops.fill_incompleto(recorded_qty, executed_qty):
+            # Se avisa DESPUÉS de cerrar la posición: `send_sync` solo atrapa
+            # RuntimeError, así que una caída de Telegram (timeout, conexión)
+            # propagaría y dejaría la posición sin cerrar — abortando en el
+            # mismo punto en cada scan siguiente. La posición ya convergió en
+            # la DB pase lo que pase con la notificación.
             notifier.send_sync(
                 f"⚠️ <b>Fill parcial en stop nativo</b> {symbol}\n"
                 f"Posición #{pos_id}: ejecutado {executed_qty:.8f} de "
@@ -124,11 +136,6 @@ def detectar_cierres_externos(symbol: str) -> None:
                 f"<i>Se cierra la posición pero el P&L registrado solo cubre "
                 f"la parte ejecutada. El remanente queda en la wallet y lo "
                 f"recoge _sweep_dust — reconciliar el P&L a mano.</i>")
-
-        pnl_usdt = (fill_price - pos["entry_price"]) * qty
-        pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
-        db.close_position(pos_id, fill_price, pnl_usdt, pnl_pct, "native_stop")
-        encontradas += 1
 
         notifier.send_sync(
             f"🛡 <b>Stop nativo ejecutado</b> {symbol}\n"

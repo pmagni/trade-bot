@@ -11,9 +11,12 @@ from native_stops import (DesiredStop, desired_stops, ReconcilePlan, reconcile_p
                           falta_balance, parse_position_id, fill_incompleto)
 
 
-def _pos(pos_id=1, symbol="BNBUSDT", qty=0.02, stop_loss=600.0):
+def _pos(pos_id=1, symbol="BNBUSDT", qty=0.02, stop_loss=600.0, trade_type=None):
     """Posición estilo fila de la tabla positions."""
-    return {"id": pos_id, "symbol": symbol, "qty": qty, "stop_loss": stop_loss}
+    pos = {"id": pos_id, "symbol": symbol, "qty": qty, "stop_loss": stop_loss}
+    if trade_type is not None:
+        pos["trade_type"] = trade_type
+    return pos
 
 
 PRECIOS = {"BNBUSDT": 650.0, "ETHUSDT": 2400.0}
@@ -82,6 +85,25 @@ def test_funciona_bajo_las_tres_reglas_de_stop(stop_loss):
                       enabled=["BNBUSDT"], now_ms=NOW_MS)
 
     assert d[1].trigger_price == pytest.approx(stop_loss * 0.985)
+
+
+def test_ignora_posicion_futures():
+    """
+    Una posición futures no tiene el activo base en la wallet spot: una orden
+    condicional spot fallaría y, encima, inflaría tracked_qty en el chequeo de
+    balance produciendo un falso falta_balance.
+    """
+    d = desired_stops([_pos(trade_type="futures")], PRECIOS, margin=0.015,
+                      enabled=["BNBUSDT"], now_ms=NOW_MS)
+
+    assert d == {}
+
+
+def test_trata_trade_type_ausente_como_spot():
+    """Compatibilidad con filas existentes creadas antes de que trade_type existiera."""
+    d = desired_stops([_pos()], PRECIOS, margin=0.015, enabled=["BNBUSDT"], now_ms=NOW_MS)
+
+    assert 1 in d
 
 
 def test_varias_posiciones_del_mismo_simbolo():
@@ -291,3 +313,21 @@ def test_fill_incompleto_ejecutado_ausente_no_cuenta():
 
 def test_fill_incompleto_ejecucion_completa():
     assert fill_incompleto(recorded_qty=0.5, executed_qty=0.5) is False
+
+
+def test_qty_truncada_del_exchange_no_recoloca_en_loop():
+    """
+    Caso real: un runner de 0.0231 BNB deja 0.01155 en la DB tras una venta
+    parcial. `place_spot_stop_order` trunca a la precisión base (4 decimales
+    para BNB) al colocar, así que el exchange reporta "0.0115". Comparar sin
+    truncar el mismo modo hace que la orden se recoloque en cada scan para
+    siempre — exactamente lo que `_misma` existe para evitar.
+    """
+    d = desired_stops([_pos(qty=0.01155)], PRECIOS, margin=0.015,
+                      enabled=["BNBUSDT"], now_ms=NOW_MS)
+    stop = d[1]
+
+    plan = reconcile_plan(d, actual=[
+        _orden(pos_id=1, qty="0.0115", trigger=str(stop.trigger_price), now_ms=NOW_MS)])
+
+    assert plan == ReconcilePlan(to_place=[], to_cancel=[])
