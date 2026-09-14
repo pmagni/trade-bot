@@ -377,6 +377,84 @@ class Exchange:
             logger.error(f"Error closing futures position for {symbol}: {e}")
             raise
 
+    # ─── v2.20: stops nativos ───
+
+    def place_spot_stop_order(self, symbol: str, qty: float,
+                              trigger_price: float, link_id: str) -> dict:
+        """
+        Orden condicional de venta spot (red de seguridad bajo el stop del bot).
+
+        orderFilter="StopOrder" es obligatorio y NO es intercambiable con
+        "tpslOrder": tpslOrder ocupa el activo base apenas se coloca, lo que
+        dejaría al bot sin poder vender. StopOrder no lo ocupa hasta el trigger.
+        """
+        precision = self.get_qty_precision(symbol)
+        factor = 10 ** precision
+        qty_str = f"{int(qty * factor) / factor:.{precision}f}"
+
+        resp = self._call_with_retry(
+            self.client.place_order,
+            category="spot",
+            symbol=symbol,
+            side="Sell",
+            orderType="Market",
+            qty=qty_str,
+            orderFilter="StopOrder",
+            triggerPrice=f"{trigger_price:.8f}".rstrip("0").rstrip("."),
+            orderLinkId=link_id,
+        )
+        order_id = resp["result"]["orderId"]
+        logger.info(
+            f"STOP NATIVO {symbol}: {qty_str} @ trigger {trigger_price:.4f} "
+            f"({link_id}) order_id={order_id}")
+        return {"order_id": order_id}
+
+    def cancel_order(self, symbol: str, order_id: str) -> dict:
+        """Cancela una orden por id. Usado para converger stops nativos."""
+        resp = self._call_with_retry(
+            self.client.cancel_order,
+            category="spot",
+            symbol=symbol,
+            orderId=order_id,
+            orderFilter="StopOrder",
+        )
+        logger.info(f"Cancelada orden {order_id} de {symbol}")
+        return {"order_id": resp["result"]["orderId"]}
+
+    def get_open_stop_orders(self, symbol: str) -> list:
+        """Órdenes condicionales spot abiertas para el símbolo."""
+        resp = self._call_with_retry(
+            self.client.get_open_orders,
+            category="spot",
+            symbol=symbol,
+            orderFilter="StopOrder",
+        )
+        return resp["result"]["list"]
+
+    def get_filled_stop_orders(self, symbol: str, link_id_prefix: str = "nsl-",
+                               lookback_hours: int = 168) -> list:
+        """
+        Órdenes condicionales nuestras que ya se ejecutaron.
+
+        Sirve para reconstruir un cierre que ocurrió con el bot muerto: da el
+        position_id (en el orderLinkId) y el precio de fill real.
+
+        lookback_hours=168 (7 días) es el máximo que Bybit guarda de historial
+        spot. El blackout de jun-2026 duró 55h, así que entra con margen.
+        """
+        start_ms = int((time.time() - lookback_hours * 3600) * 1000)
+        resp = self._call_with_retry(
+            self.client.get_order_history,
+            category="spot",
+            symbol=symbol,
+            orderFilter="StopOrder",
+            startTime=start_ms,
+            limit=50,
+        )
+        return [o for o in resp["result"]["list"]
+                if (o.get("orderLinkId") or "").startswith(link_id_prefix)
+                and o.get("orderStatus") == "Filled"]
+
     # ─── HEALTH CHECK ───
 
     def health_check(self) -> Tuple[bool, str]:
