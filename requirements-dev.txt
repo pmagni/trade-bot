@@ -1,0 +1,14 @@
+# Dependencias solo para desarrollo/tests. NO se instalan en producción.
+#
+# Setup:
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements-dev.txt
+#   .venv/bin/python -m pytest
+#
+# Nota: los tests de tests/test_monitoring.py solo necesitan pytest + requests
+# (monitoring.py importa únicamente requests, a propósito). Testear módulos que
+# importen bot.py/notifications.py requiere además -r requirements.txt.
+
+-r requirements.txt
+
+pytest>=8.0.0

@@ -20,6 +20,7 @@ from strategy import strategy
 from risk_manager import risk_manager
 from portfolio import portfolio
 from notifications import notifier
+from monitoring import heartbeat
 
 # ─── LOGGING SETUP ───
 logging.basicConfig(
@@ -223,6 +224,22 @@ class SwingBot:
             self._adapt_scan_speed(all_signals)
 
             logger.info("─── Scan cycle complete ───")
+
+            # v2.18 — Deadman: señal de vida hacia afuera.
+            #
+            # Va acá, y no en un job aparte, porque escanear ES el trabajo: si
+            # scan_cycle se colgara con el proceso vivo, un ping emitido desde
+            # otro timer mentiría diciendo "todo bien". Va al final para que el
+            # trading ya haya ocurrido.
+            #
+            # La guarda `if all_signals` exige que al menos un símbolo se haya
+            # analizado con éxito (se asigna dentro del try por símbolo). Sin
+            # ella, una caída total de Bybit dejaría al bot funcionalmente
+            # ciego pero reportando salud.
+            #
+            # heartbeat() nunca lanza — ver monitoring.py y tests/.
+            if all_signals:
+                heartbeat(config.monitoring.heartbeat_url)
 
         except Exception as e:
             logger.error(f"Scan cycle error: {e}")
