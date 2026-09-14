@@ -172,16 +172,25 @@ def test_idempotencia_con_diferentes_now_ms():
     Propiedad de idempotencia: un estado convergido produce plan vacío
     INCLUSO si now_ms es diferente. Esto es crítico porque el link_id ahora
     incluye el timestamp y cada llamada genera un nuevo timestamp.
+
+    Si esto falla (matching regresa a link_id literal), el bot cancelaría y
+    recolocaría cada orden en cada scan, gastando rate limit y dejando brechas
+    sin protección.
     """
     d1 = desired_stops([_pos()], PRECIOS, margin=0.015, enabled=["BNBUSDT"], now_ms=1000)
     stop1 = d1[1]
 
-    # Orden actual con el mismo position_id pero diferente now_ms
+    # Orden actual con el MISMO position_id pero DIFERENTE timestamp en link_id.
+    # Construir literalmente con diferente now_ms para probar que matching es
+    # por position_id, no por link_id literal.
+    actual_link_id = "nsl-1-999"  # mismo position_id (1), diferente timestamp
+
     plan = reconcile_plan(d1, actual=[
-        {"orderId": "abc", "orderLinkId": stop1.link_id, "qty": str(stop1.qty),
+        {"orderId": "abc", "orderLinkId": actual_link_id, "qty": str(stop1.qty),
          "triggerPrice": str(stop1.trigger_price)}])
 
     # El plan debe estar vacío porque position_id coincide y qty/trigger son iguales
+    # Si falla aquí, significa que matching regresó a link_id literal.
     assert plan == ReconcilePlan(to_place=[], to_cancel=[])
 
 
@@ -200,7 +209,7 @@ def test_duplicados_position_id_se_cancelan():
     ])
 
     # Primera se mantiene (match), duplicada se cancela
-    assert "duplicada" in plan.to_cancel
+    assert plan.to_cancel == ["duplicada"]
     assert plan.to_place == []
 
 
