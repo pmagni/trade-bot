@@ -12,3 +12,8 @@ __pycache__/
 .gstack/
 data/
 data_ago2026/
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
+
+# Config local de Claude Code (por-desarrollador, contiene rutas/IPs locales)
+.claude/settings.local.json

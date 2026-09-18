@@ -63,12 +63,38 @@ construcción solo cierran en ganancia y rápido. Dentro de `signal_sell` sola
 el patrón se desarma (0-12h: −$1.33/trade). El holding period no es causal:
 es el residuo de la regla de salida. **Hipótesis 1: refutada como causa.**
 
-### 2.3 El techo no es el take-profit, es el trailing
+### 2.3 El techo por trade es bajo — y el take-profit es lo que lo sostiene
 
-Ganadores: p90 = +4.30%, máximo absoluto +7.82% en 18 meses. Correr el
-backtest con `take_profit_pct = 0` da **exactamente el mismo resultado** en las
-tres ventanas: el trailing (activa a +1.5%, distancia 0.8%) corta antes que el
-TP en casi todos los casos. El techo efectivo por trade es ~+2.3%.
+Ganadores: p90 = +4.30%, máximo absoluto +7.82% en 18 meses. El techo efectivo
+por trade es ~+2.3%: esta estrategia no tiene trades grandes, tiene muchos
+trades chicos que cierran rápido.
+
+La pregunta natural es cuál de las dos reglas de salida impone ese techo — el
+take-profit de +3% o el trailing (activa a +1.5%, distancia 0.8%). La respuesta
+es el take-profit, y no por poco. Corriendo con `take_profit_pct = 0` y el
+trailing intacto, sobre los 18 meses completos:
+
+| | retorno | maxDD | PF |
+|---|---|---|---|
+| producción | **+5.77%** | 10.2% | **1.33** |
+| sin take-profit (`notp`) | **−4.09%** | 11.9% | 1.06 |
+
+Casi 10 puntos de diferencia. **El TP de +3% es load-bearing**: no es un techo
+inerte que el trailing vuelve irrelevante, es la regla que convierte la
+estrategia en rentable. Sin él, el trailing suelta las ganancias chicas antes
+de que se consoliden y el sistema queda en pérdida.
+
+> **Corrección (revisión posterior).** Una versión anterior de esta sección
+> afirmaba lo contrario — que quitar el TP "da exactamente el mismo resultado"
+> y que el techo lo ponía el trailing. El error fue de comparación: la fila
+> `notp` es idéntica a `tprun` (la variante donde el TP arma el trailing en vez
+> de vender), **no** a producción. Se cotejó contra la fila equivocada. La
+> conclusión correcta es la inversa, y es la que queda arriba.
+
+Esto no cambia ninguna recomendación de este informe — la propuesta de §4 no
+toca el take-profit — pero sí refuerza §3: sobre una entrada de reversión, el
+objetivo tiene que ser corto y duro. Aflojarlo, de cualquiera de las formas
+probadas, empeora el resultado.
 
 ## 3. Lo que NO funciona (probado, no asumido)
 
@@ -107,8 +133,12 @@ primera pasada, antes de mirar W2/W3.
 | `+ sell_partial=6` | **+13.86%** | **+0.14%** | **+3.42%** | **+16.61%** | **10.4%** | **1.61** |
 | + sin reentry | +13.17% | −0.50% | +4.06% | +16.37% | 10.6% | 1.63 |
 
-Robustez en 6 ventanas de 3 meses: la config propuesta gana a producción en
-**5 de 6**.
+Robustez en 6 ventanas de 3 meses (`2026-09-18-sweep-6ventanas.txt`): la
+config propuesta gana a producción en **4 de 6**. Pierde en W6 (−0.97% vs
+−0.07%) y empata técnicamente en W3 (+1.55% vs +1.57%, 0.02pp). Nota: el
+**5 de 6** que figuraba antes acá correspondía a `ms6_sg6_nr` — la variante
+con reentry desactivado, que no es la que se recomienda. El artefacto ahora
+corre las tres filas (`prod`, `ms6_sg6`, `ms6_sg6_nr`) en la misma pasada.
 
 Sensibilidad (descarta óptimo de filo): buy score 5 → +13.93%, **6 → +16.61%**,
 7 → +5.10%. El 6 no es un pico ajustado: es el borde entre trades que no
@@ -146,7 +176,7 @@ camino, no por ventana: evita W2 y compone desde una base más alta.
 El objetivo — batir buy & hold por 3-5pp con maxDD ≤12% sobre 18 meses — se
 cumple con `min_buy_score=6` + `sell_partial=6`: **+16.61% vs +10.81%
 (+5.80pp), maxDD 10.4% (< 12%), PF 1.61 (> 1.38-1.40 actual)**, validado fuera
-de muestra en dos ventanas y en 5 de 6 sub-ventanas.
+de muestra en dos ventanas y en 4 de 6 sub-ventanas.
 
 Lo que **no** se cumple, y conviene decirlo: el objetivo *narrativo* —
 "capturar ciclos alcistas y vender antes de la caída" — no es lo que hace esta
