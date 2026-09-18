@@ -718,6 +718,14 @@ class Strategy:
         trailing_stop = position.get("trailing_stop", 0)
         trailing_max = position.get("trailing_max", entry_price)
 
+        # v2.21 — high-water mark independiente del trailing. `trailing_max` solo
+        # se actualiza por encima de la activación (+1.5%), asi que no sirve para
+        # saber si la posición estuvo en ganancia por debajo de ese umbral.
+        # Mutación in-place: el sim la persiste; para produccion haria falta una
+        # columna `hwm` en `positions` (no se toca en este ciclo).
+        hwm = max(position.get("hwm", entry_price), current_price)
+        position["hwm"] = hwm
+
         # Fixed stop-loss
         if stop_loss > 0 and current_price <= stop_loss:
             pnl_pct = (current_price - entry_price) / entry_price
@@ -725,12 +733,25 @@ class Strategy:
 
         pnl_pct = (current_price - entry_price) / entry_price
 
+        # v2.21 EXPERIMENTAL — break-even. Si la posición llego a +breakeven_trigger
+        # y despues volvio a la entrada, cerrar plano en vez de dejarla caer al stop.
+        be = config.risk.breakeven_trigger_pct
+        if be > 0 and (hwm - entry_price) / entry_price >= be:
+            be_price = entry_price * (1 + config.risk.breakeven_offset_pct)
+            if current_price <= be_price:
+                return True, f"breakeven ({pnl_pct:+.1%})"
+
         # v2.14 — Take-profit: asegura la ganancia pequeña antes de que se evapore.
         # v2.15 — Si take_profit_partial: vende solo una fracción y deja un runner
         # con trailing. Las posiciones con tp_taken=1 ya cobraron su parcial y las
         # gestiona únicamente el trailing de más abajo.
         tp = config.risk.take_profit_pct
         if tp > 0 and pnl_pct >= tp and not position.get("tp_taken"):
+            if config.risk.tp_arms_trailing:
+                # v2.21 EXPERIMENTAL: no vender — armar el trailing y dejar correr.
+                dist = (config.risk.tp_arm_trailing_distance
+                        or config.risk.trailing_stop_distance)
+                return False, f"tp_arm:{current_price}:{current_price * (1 - dist)}"
             if config.risk.take_profit_partial:
                 return True, f"take_profit_partial ({pnl_pct:+.1%})"
             return True, f"take_profit ({pnl_pct:+.1%})"

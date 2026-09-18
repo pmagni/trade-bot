@@ -152,6 +152,10 @@ class ScoringConfig:
     # BTC score-6 trades: 100% win rate, +3.5% avg — require confirmed signal
     btc_min_buy_score: int = 6           # BTC needs stronger confirmation than ETH
 
+    # v2.21 EXPERIMENTAL: piso global de score de compra (0 = usar buy_light).
+    # Las entradas score-5 dan 53 trades y -$0.50 de P&L en 18m: churn puro.
+    global_min_buy_score: int = 0
+
     # Sell score thresholds (raised: score-4 sells had 43% win rate — too early)
     sell_no_action: int = 4
     sell_partial: int = 5               # Score 5-6: sell 25%
@@ -271,6 +275,26 @@ class RiskConfig:
     # AHORA: reanuda solo cuando el drawdown se recupera por debajo del umbral.
     auto_resume_enabled: bool = True
     auto_resume_drawdown_pct: float = 0.06   # reanuda cuando drawdown actual <= 6%
+
+    # ── v2.21 EXPERIMENTAL (todos default OFF — ver docs/backtests/walkforward) ──
+    # Protección de break-even. Diagnóstico sobre 268 trades del backtest 18m:
+    # los 158 perdedores alcanzaron +1.27% de MFE medio antes de cerrar a -1.98%.
+    # El trailing recién se arma a +1.5%, así que la forma de trade más común
+    # (sube ~1%, se da vuelta, muere en el stop) no tiene ninguna protección.
+    # 0 = desactivado. >0 = al tocar ese MFE, el stop sube a entrada+fees.
+    breakeven_trigger_pct: float = 0.0
+    breakeven_offset_pct: float = 0.002   # entrada × (1+offset): cubre los dos fees
+
+    # Time-stop duro: cerrar posiciones en pérdida más viejas que N horas.
+    # El time-decay actual solo SUMA score; si el sell score no llega al umbral
+    # la posición sigue abierta. Banda 96-240h: 63 trades, -$26, win 11%.
+    # 0 = desactivado.
+    time_stop_hours: float = 0.0
+
+    # El take-profit arma el trailing en vez de cerrar (deja correr al ganador).
+    # Distinto de take_profit_partial (que vende la mitad): acá no vende nada.
+    tp_arms_trailing: bool = False
+    tp_arm_trailing_distance: float = 0.0  # 0 = usar trailing_stop_distance
 
     # Leverage (optional, disabled by default)
     leverage_enabled: bool = False

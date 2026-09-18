@@ -47,9 +47,14 @@ def load_data(data_dir: Path, symbols: list) -> dict:
 
 
 class BacktestSim:
-    def __init__(self, data: dict, symbols: list):
+    def __init__(self, data: dict, symbols: list, i_start: int = None, i_end: int = None):
         self.data = data
         self.symbols = symbols
+        # Ventana de trading (indices sobre las velas 4h). None = todo el dataset.
+        # El warmup de indicadores usa las velas ANTERIORES a i_start, que siguen
+        # disponibles: la ventana limita cuando se opera, no que se puede mirar.
+        self.i_start = i_start
+        self.i_end = i_end
         self.strategy = Strategy()
         # Anular dependencias externas: niveles clave y Fear&Greed
         import strategy as strategy_module
@@ -134,7 +139,9 @@ class BacktestSim:
                         self._set_cooldown(symbol, "sell", config.risk.cooldown_after_sell, ts)
                     else:
                         self._close_position(symbol, pos, price, reason, ts)
-                        if reason.startswith("take_profit"):
+                        if reason.startswith("breakeven"):
+                            self._set_cooldown(symbol, "sell", config.risk.cooldown_after_sell, ts)
+                        elif reason.startswith("take_profit"):
                             self._set_cooldown(symbol, "sell", config.risk.cooldown_after_sell, ts)
                         elif reason.startswith("stop_loss"):
                             self._set_cooldown(symbol, "buy", config.risk.cooldown_after_stop_loss, ts)
@@ -143,6 +150,12 @@ class BacktestSim:
                             self._set_cooldown(symbol, "sell", config.risk.cooldown_after_sell, ts)
                 elif reason.startswith("trailing_update:"):
                     _, new_max, new_trailing = reason.split(":")
+                    pos["trailing_max"] = float(new_max)
+                    pos["trailing_stop"] = float(new_trailing)
+                elif reason.startswith("tp_arm:"):
+                    # v2.21: el TP armo el trailing sin vender nada.
+                    _, new_max, new_trailing = reason.split(":")
+                    pos["tp_taken"] = 1
                     pos["trailing_max"] = float(new_max)
                     pos["trailing_stop"] = float(new_trailing)
 
@@ -190,7 +203,10 @@ class BacktestSim:
 
     def run(self):
         n = min(len(self.data[s]["4h"]) for s in self.symbols)
-        for i in range(WARMUP, n):
+        if self.i_end is not None:
+            n = min(n, self.i_end)
+        start = max(WARMUP, self.i_start or 0)
+        for i in range(start, n):
             ts = self.data[self.symbols[0]]["4h"][i]["timestamp"]
             day = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
             prices_close = {s: self.data[s]["4h"][i]["close"] for s in self.symbols}
@@ -209,6 +225,16 @@ class BacktestSim:
                 daily_all = [c for c in self.data[sym]["daily"] if c["timestamp"] <= ts]
                 window_daily = daily_all[-90:]
                 ind = self.strategy.compute_indicators(window_4h, window_daily)
+
+                # v2.21 EXPERIMENTAL — time-stop duro sobre posiciones en pérdida.
+                ts_hours = config.risk.time_stop_hours
+                if ts_hours > 0:
+                    close_px = candle["close"]
+                    for pos in list(self.positions[sym]):
+                        age_h = (ts - pos["ts"]) / 3.6e6
+                        if age_h >= ts_hours and close_px < pos["entry_price"]:
+                            self._close_position(sym, pos, close_px, "time_stop", ts)
+                            self._set_cooldown(sym, "sell", config.risk.cooldown_after_sell, ts)
 
                 open_pos = self.positions[sym]
                 buy_score, buy_details = self.strategy.calc_buy_score(ind, sym)
@@ -261,6 +287,9 @@ class BacktestSim:
 
                 # ── BUY por señal ──
                 buy_threshold = config.scoring.buy_light
+                if config.scoring.global_min_buy_score > 0:
+                    buy_threshold = max(buy_threshold,
+                                        config.scoring.global_min_buy_score)
                 if not ind["above_ema_200"]:
                     buy_threshold = max(buy_threshold, 6)
                 if sym == "BTCUSDT":
@@ -363,6 +392,47 @@ class BacktestSim:
             "reasons": {r: sum(1 for t in trades if t["reason"] == r)
                         for r in sorted({t["reason"] for t in trades})},
         }
+
+
+def buy_and_hold(data: dict, symbols: list, i_start: int, i_end: int) -> dict:
+    """
+    Baseline buy-and-hold equiponderado sobre el mismo universo y la misma
+    ventana que corre la estrategia.
+
+    Existe porque el harness nunca lo calculo: `VARIANTS["baseline"]` es la
+    config v2.14, no "no hacer nada". La regla de la casa ("no ship sin batir
+    baseline") se estaba evaluando contra otra estrategia, no contra el costo
+    de oportunidad de quedarse quieto.
+
+    Convenciones, iguales a las del sim: compra al cierre de la vela i_start,
+    liquida al cierre de i_end-1, fee 0.1% por lado, capital repartido en
+    partes iguales entre los simbolos.
+    """
+    per_symbol = START_USDT / len(symbols)
+    qty = {}
+    for s in symbols:
+        entry = data[s]["4h"][i_start]["close"]
+        qty[s] = (per_symbol / entry) * (1 - FEE)
+
+    # curva de equity para el drawdown, marcada al cierre de cada vela
+    peak, max_dd = 0.0, 0.0
+    for i in range(i_start, i_end):
+        v = sum(qty[s] * data[s]["4h"][i]["close"] for s in symbols)
+        peak = max(peak, v)
+        if peak > 0:
+            max_dd = max(max_dd, (peak - v) / peak)
+
+    final = sum(qty[s] * data[s]["4h"][i_end - 1]["close"] * (1 - FEE) for s in symbols)
+    per = {
+        s: round((data[s]["4h"][i_end - 1]["close"] / data[s]["4h"][i_start]["close"] - 1) * 100, 2)
+        for s in symbols
+    }
+    return {
+        "final_usdt": round(final, 2),
+        "return_pct": round((final - START_USDT) / START_USDT * 100, 2),
+        "max_drawdown_pct": round(max_dd * 100, 1),
+        "per_symbol_pct": per,
+    }
 
 
 SUB_FLAGS = ["uptrend_guard_relax", "uptrend_pullback_score", "uptrend_reentry",
