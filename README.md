@@ -50,7 +50,7 @@ deploy — see `docs/AUDITORIA_2026-08-16.md`.
 
 **Production (systemd):**
 ```
-Server: root@159.223.8.250
+Server: root@$BOT_HOST   # exportá la IP en tu shell; no se versiona
 Path:   /opt/dcabot/
 Service: sudo systemctl restart swing-bot
 Logs:   journalctl -u swing-bot -f

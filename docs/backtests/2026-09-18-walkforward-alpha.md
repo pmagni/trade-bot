@@ -140,10 +140,34 @@ config propuesta gana a producción en **4 de 6**. Pierde en W6 (−0.97% vs
 con reentry desactivado, que no es la que se recomienda. El artefacto ahora
 corre las tres filas (`prod`, `ms6_sg6`, `ms6_sg6_nr`) en la misma pasada.
 
-Sensibilidad (descarta óptimo de filo): buy score 5 → +13.93%, **6 → +16.61%**,
-7 → +5.10%. El 6 no es un pico ajustado: es el borde entre trades que no
-aportan nada y trades que aportan todo. Los 53 trades score-5 de 18 meses
-suman **−$0.50** de P&L. Los 115 score-6 suman +$54.
+**Sensibilidad, un eje por vez** (18m, `2026-09-18-sensibilidad-scores.txt`).
+Una versión anterior de este párrafo mezclaba los dos ejes en una sola línea
+rotulada "buy score"; los valores que citaba eran mitad de un barrido y mitad
+del otro. Corridos por separado:
+
+| buy score (sell gate fijo en 6) | 18m | | sell gate (buy score fijo en 6) | 18m |
+|---|---|---|---|---|
+| 5 | +7.03% | | 5 | +13.93% |
+| **6** | **+16.61%** | | **6** | **+16.61%** |
+| 7 | +5.10% | | 7 | +14.93% |
+
+El sell gate se porta bien: la meseta 5-7 va de +13.93% a +16.61%, así que el 6
+es una preferencia, no una dependencia.
+
+**El buy score no.** Los vecinos del 6 valen menos de la mitad (+7.03% y
++5.10%): es un pico pronunciado, y hay que decirlo — es la fragilidad principal
+de esta propuesta, no un detalle. Lo que la sostiene no es la forma de la curva
+sino que cada lado tiene una explicación mecánica distinta: por abajo, los 53
+trades score-5 de 18 meses suman **−$0.50** de P&L contra +$54 de los 115
+score-6 — es churn puro, y filtrarlo es lo que produce el salto; por arriba, el
+7 no falla por mala selección sino por inanición, deja tan pocas entradas que
+no alcanza a componer. Que ambos lados caigan por razones diferentes hace menos
+probable que el 6 sea un artefacto del dataset, pero **no lo descarta**: con un
+solo ciclo de datos, un pico de esta forma es exactamente lo que produciría el
+overfitting. Antes de operar esto con capital real hay que verlo en otro ciclo.
+
+Nota: el 6 ya tiene precedente independiente — `btc_min_buy_score = 6` existe
+desde v2.10, calibrado sobre otros datos y por otra vía.
 
 Nota: `btc_min_buy_score = 6` ya existe desde v2.10 con la misma justificación.
 Este cambio extiende a ETH y BNB una regla que BTC ya tenía.
@@ -178,6 +202,13 @@ cumple con `min_buy_score=6` + `sell_partial=6`: **+16.61% vs +10.81%
 (+5.80pp), maxDD 10.4% (< 12%), PF 1.61 (> 1.38-1.40 actual)**, validado fuera
 de muestra en dos ventanas y en 4 de 6 sub-ventanas.
 
+Con una salvedad que pesa: el resultado cuelga de un parámetro con pico
+pronunciado. Mover el buy score un punto en cualquier dirección corta el
+retorno a menos de la mitad (§4). Hay razones mecánicas para que el 6 sea el
+lugar correcto, pero sobre un solo ciclo de datos eso no se puede distinguir
+de un ajuste al dataset. El veredicto es "se cumple en backtest", no "está
+listo para capital real" — para eso falta §7.
+
 Lo que **no** se cumple, y conviene decirlo: el objetivo *narrativo* —
 "capturar ciclos alcistas y vender antes de la caída" — no es lo que hace esta
 estrategia ni lo que puede hacer con esta arquitectura. En W1 el mercado hizo
@@ -192,7 +223,7 @@ eso es un proyecto nuevo, no un ajuste de parámetros.
 
 1. **Datos reales de la tabla `trades`.** Este diagnóstico usa el backtest
    (268 cierres). La DB local está vacía y la de producción
-   (`root@159.223.8.250`, ~222 cierres) no fue accesible: la clave SSH no está
+   (`root@$BOT_HOST`, ~222 cierres) no fue accesible: la clave SSH no está
    cargada. Correr `ssh-add ~/.ssh/id_ed25519` y repetir §2 sobre datos reales.
 2. **Un solo dataset.** 18 meses, un ciclo completo. La conclusión de §3
    (reversión ≠ tendencia) es mecanística y debería generalizar; la calibración

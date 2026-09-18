@@ -154,7 +154,7 @@ Con TP +1.8% y stop −2.5% necesitas ~58% win-rate para break-even tras fees; e
 - **Cuenta real (mainnet, `BYBIT_TESTNET=false`).** Cualquier cambio mueve dinero real. Recomiendo: implementar en una rama, **validar en testnet o en backtest extendido** (el módulo `v 2.0/backtest.py` existe), y desplegar gradualmente.
 - **Fees comen el scalp.** A 0.1%/lado, un round-trip cuesta 0.2%. Un TP de +1.8% deja +1.6% neto — viable, pero confirma tu fee tier en Bybit (maker/VIP baja costos). Si pagas 0.1% taker, evita scalps <1.5%.
 - **Régimen lo es todo.** Insisto: este sistema debe **apagarse solo** en bajista. Sin el filtro §3.2 (P1), bajar el TP empeora resultados (§3.1).
-- **No pude auditar las transacciones reales de producción** (`root@159.223.8.250:/opt/dcabot/swing_bot.db`): la llave SSH no está cargada en el agente (`Permission denied (publickey)`). La DB local está **vacía** (0 trades/posiciones). Para cerrar el análisis con tu historial real, ejecuta `ssh-add ~/.ssh/id_ed25519` y vuelvo a tirar de los trades reales para contrastar P&L, win-rate y razones de cierre efectivos.
+- **No pude auditar las transacciones reales de producción** (`root@$BOT_HOST:/opt/dcabot/swing_bot.db`): la llave SSH no está cargada en el agente (`Permission denied (publickey)`). La DB local está **vacía** (0 trades/posiciones). Para cerrar el análisis con tu historial real, ejecuta `ssh-add ~/.ssh/id_ed25519` y vuelvo a tirar de los trades reales para contrastar P&L, win-rate y razones de cierre efectivos.
 
 ---
 
@@ -168,7 +168,7 @@ Con TP +1.8% y stop −2.5% necesitas ~58% win-rate para break-even tras fees; e
 
 ## 7. Análisis del historial real de producción (274 trades, abr–jun 2026)
 
-Fuente: `root@159.223.8.250:/opt/dcabot/swing_bot.db` copiada el 27-jun. **Cuenta real, mainnet, ~$100 de capital.**
+Fuente: `root@$BOT_HOST:/opt/dcabot/swing_bot.db` copiada el 27-jun. **Cuenta real, mainnet, ~$100 de capital.**
 
 ### 7.1 El bot está PAUSADO — esta es la causa directa de "no opera"
 ```

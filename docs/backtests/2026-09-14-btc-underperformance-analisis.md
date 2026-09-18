@@ -1,6 +1,6 @@
 # BTC "underperformance": la premisa no se sostiene
 
-Fecha: 2026-09-14 · Datos: producción (`root@159.223.8.250`, 222 cierres) +
+Fecha: 2026-09-14 · Datos: producción (`root@$BOT_HOST`, 222 cierres) +
 backtest `combo` sobre `data_ago2026` (mar-2025 → ago-2026, 245 cierres).
 
 ## La cifra que originó el pendiente
