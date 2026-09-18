@@ -63,6 +63,12 @@ construcción solo cierran en ganancia y rápido. Dentro de `signal_sell` sola
 el patrón se desarma (0-12h: −$1.33/trade). El holding period no es causal:
 es el residuo de la regla de salida. **Hipótesis 1: refutada como causa.**
 
+> **Revocado por §2.4.** Este veredicto no sobrevivió al contraste con
+> producción. El control que lo sostiene — `signal_sell` sola — está deformado
+> en el harness, que estira el hold mediano de esa salida de 16h a 76h. Sobre
+> datos reales el patrón sí se mantiene dentro de `signal_sell`
+> (p = 0.003). H1 vuelve a estar abierta.
+
 ### 2.3 El techo por trade es bajo — y el take-profit es lo que lo sostiene
 
 Ganadores: p90 = +4.30%, máximo absoluto +7.82% en 18 meses. El techo efectivo
@@ -95,6 +101,60 @@ Esto no cambia ninguna recomendación de este informe — la propuesta de §4 no
 toca el take-profit — pero sí refuerza §3: sobre una entrada de reversión, el
 objetivo tiene que ser corto y duro. Aflojarlo, de cualquiera de las formas
 probadas, empeora el resultado.
+
+### 2.4 Contraste con producción real — H1 vuelve a estar viva
+
+Datos: tabla `positions` de producción, 229 cierres entre 2026-04-01 y
+2026-09-18 (5.5 meses, posición mediana $10.02, spot puro — `leverage = 1.0`
+en las 229). Es la verificación que §7.1 dejaba pendiente. **No confirma §2.1
+ni §2.2.**
+
+| razón | n | %/trade real | hold med real | hold med backtest |
+|---|---|---|---|---|
+| take_profit | 15 | +3.16% | 18h | 24h |
+| trailing_stop | 7 | +2.10% | 30h | 36h |
+| stop_loss | 18 | −5.08% | 25h | 28h |
+| **signal_sell** | **164** | **+0.71%** | **16h** | **76h** |
+
+PF real 1.23, win rate 64%, P&L +$7.12 sobre 229 trades.
+
+**Dos divergencias con el backtest, y son la misma.** Primero: en el harness
+`signal_sell` es un lastre de P&L ≈ 0 (−$0.20/trade); en producción es el
+principal aportante (+0.71%/trade, 66% de aciertos). Segundo: su hold mediano
+es 16h real contra 76h simulado — **4.75x**. Las otras tres salidas coinciden
+dentro del 25%, así que el harness no está mal en general: está mal
+exactamente en la salida por score, que es el 72% de los cierres.
+
+La causa es conocida y ya estaba documentada como límite del harness: el
+backtest evalúa señales solo al cierre de velas 4h, mientras el bot escanea
+cada 5-15 minutos. Las salidas por regla (TP, trailing, stop) disparan
+intra-vela y por eso coinciden. La salida por score solo puede dispararse en
+el tick de las 4h, así que el simulador la retrasa sistemáticamente.
+
+**Consecuencia sobre la hipótesis 1.** §2.2 la declaró "refutada como causa"
+porque, dentro de `signal_sell` sola, el patrón de holding period se
+desarmaba. Sobre datos reales no se desarma:
+
+| `signal_sell` sola | n | %/trade |
+|---|---|---|
+| < 24h | 104 | **+0.89%** |
+| ≥ 48h | 37 | **−0.08%** |
+
+Diferencia 0.97pp, test de permutación **p = 0.003**. El efecto sobrevive al
+control que lo mataba en simulación — y lo mataba porque el harness comprime
+todos los holds cortos hacia arriba, hasta 76h de mediana. **H1 vuelve a estar
+abierta**: sobre datos reales, los holds largos por señal sí destruyen valor.
+
+Lo que esto NO autoriza es reinstalar el time-stop: la variante `time_stop_48h`
+se probó y fue negativa (§3), pero se probó *en el harness*, o sea contra la
+misma distribución de holds deformada. Ese experimento hay que rehacerlo con un
+simulador que vea ventanas menores a 4h, o directamente en canario.
+
+**Alcance.** 5.5 meses contra los 18 del backtest, un solo régimen, y P&L total
+de $7.12 — los porcentajes son sólidos, los dólares son ruido de tamaño de
+posición. No invalida §4: la calibración de scores no depende de esto. Sí
+degrada la confianza en cualquier conclusión del informe que dependa del
+*timing* de `signal_sell`.
 
 ## 3. Lo que NO funciona (probado, no asumido)
 
@@ -221,10 +281,14 @@ eso es un proyecto nuevo, no un ajuste de parámetros.
 
 ## 7. Lo que falta antes de ir a producción
 
-1. **Datos reales de la tabla `trades`.** Este diagnóstico usa el backtest
-   (268 cierres). La DB local está vacía y la de producción
-   (`root@$BOT_HOST`, ~222 cierres) no fue accesible: la clave SSH no está
-   cargada. Correr `ssh-add ~/.ssh/id_ed25519` y repetir §2 sobre datos reales.
+1. ~~**Datos reales de la tabla `trades`.**~~ **Hecho — ver §2.4.** Se
+   contrastaron los 229 cierres reales de producción (2026-04-01 → 2026-09-18)
+   contra los 268 del backtest. Resultado: el harness es fiel en las salidas
+   por regla y no lo es en la salida por score, que es el 72% de los cierres.
+   Eso revocó el veredicto de §2.2 sobre la hipótesis 1. Lo que ahora falta en
+   su lugar: **un simulador con granularidad menor a 4h**, sin el cual no se
+   puede evaluar honestamente ninguna variante que dependa del timing de
+   `signal_sell` — incluido el time-stop descartado en §3.
 2. **Un solo dataset.** 18 meses, un ciclo completo. La conclusión de §3
    (reversión ≠ tendencia) es mecanística y debería generalizar; la calibración
    de §4 no está validada en otro ciclo.
