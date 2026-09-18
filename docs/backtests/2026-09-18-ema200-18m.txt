@@ -1,0 +1,13 @@
+Universo: BTCUSDT,ETHUSDT,BNBUSDT | velas 3373 | ventanas 1
+
+W1 2025-03-17 → 2026-09-14  BUY&HOLD +10.81%  maxDD 60.5%  {'BTCUSDT': -9.04, 'ETHUSDT': 27.93, 'BNBUSDT': 14.21}
+
+variante                              W1
+                  ret / vs B&H / DD / PF
+----------------------------------------
+prod           +5.77%  -5.04pp 10.2% 1.33
+ms6_sg6       +16.61%  +5.80pp 10.4% 1.61
+d200           -7.53% -18.34pp 12.8% 0.83
+d200_sg6       -6.38% -17.19pp 12.3% 0.87
+d200_ms6_sg6   -1.46% -12.27pp 14.0% 1.08
+d200_block    -11.09% -21.90pp 11.6% 0.61

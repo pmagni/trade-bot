@@ -96,6 +96,14 @@ class IndicatorConfig:
     ema_slow: int = 21
     ema_trend: int = 200                # Long-term trend
 
+    # v2.21 EXPERIMENTAL — cuántas velas diarias se le pasan a compute_indicators.
+    # Con 90 (el valor histórico, y el `limit` que usa bot.py:345) nunca se
+    # alcanzan las `ema_trend` velas que pide la rama diaria de strategy.py:84,
+    # así que `ema_200` cae al fallback sobre 4h: una EMA de ~99 velas 4h
+    # (~16 días) etiquetada como EMA200. Con >=200 se usa la EMA200 diaria real.
+    # Subir esto exige subir el `limit` de bot.py en el mismo commit.
+    daily_candles: int = 90
+
     # MACD
     macd_fast: int = 12
     macd_slow: int = 26
@@ -241,6 +249,16 @@ class RegimeConfig:
     uptrend_rsi_pullback_lo: float = 40.0 # RSI en zona de pullback sano...
     uptrend_rsi_pullback_hi: float = 55.0 # ...viniendo de >60 reciente
     uptrend_stop_loss_pct: float = 0.025  # stop en entradas de uptrend (era 3.5% general)
+
+    # ── v2.21 EXPERIMENTAL (default OFF — ver docs/backtests/walkforward-alpha §2.5) ──
+    # Bloquear compras bajo EMA200 en vez de sólo encarecerlas.
+    # Hoy el path de compra sube el umbral a score 6 cuando el precio está bajo
+    # EMA200. Sobre 206 entradas reales de producción esas 54 operaciones
+    # rindieron -0.73%/trade contra +0.91% de las que estaban sobre EMA200
+    # (dif +1.64pp, p=0.0005 — único componente del score que sobrevive
+    # corrección por comparaciones múltiples). La evidencia dice que encarecer
+    # se queda corto: habría que no tomarlas.
+    block_buys_below_ema200: bool = False
 
 
 @dataclass

@@ -156,6 +156,45 @@ posición. No invalida §4: la calibración de scores no depende de esto. Sí
 degrada la confianza en cualquier conclusión del informe que dependa del
 *timing* de `signal_sell`.
 
+### 2.5 Descomposición del score — el único componente que predice es la tendencia
+
+Motivación: el buy score resultó tener un pico pronunciado (§4), y un umbral
+sobre una suma trata como equivalentes señales que no lo son — 6 puntos de
+"RSI + caída + BB" y 6 de "fear&greed + EMA200 + zona" son el mismo número y no
+el mismo trade. `score_details` guarda el desglose por componente en cada
+compra, así que se puede medir cuál carga el edge. Sobre las mismas 206
+entradas reales de §2.4, comparando trades con y sin cada componente:
+
+| componente | n con | con | sin | dif | p |
+|---|---|---|---|---|---|
+| **ema_200** | 152 | +0.91% | −0.73% | **+1.64pp** | **0.0005** |
+| key_support | 48 | +1.22% | +0.26% | +0.97pp | 0.014 |
+| fear_greed | 110 | +0.22% | +0.79% | −0.57pp | 0.087 |
+| rsi | 80 | +0.17% | +0.68% | −0.51pp | 0.135 |
+| drop | 112 | +0.29% | +0.72% | −0.43pp | 0.195 |
+| zone, macd, bb, bb_pctb, rsi_reversal | — | — | — | ~0 | 0.45–0.96 |
+
+Con 13 tests el umbral de Bonferroni es 0.0038: **`ema_200` es el único que
+sobrevive**. Los componentes de reversión sobre los que está construida la
+estrategia — RSI, caída desde máximo, bandas de Bollinger, fear & greed — no
+aportan nada, y los tres primeros apuntan levemente en contra.
+
+Y el score, como nivel, no predice: correlación de rangos entre score de
+entrada y P&L **ρ = +0.06, p = 0.37** (n=206). Dentro de los trades sobre
+EMA200 el score deja de importar del todo (5 → +0.78%, 6 → +1.06%, 7 → +1.81%,
+p = 0.136 y exigir 6 recorta de 152 a 46 trades). El score parece estar
+actuando como un proxy ruidoso de la tendencia.
+
+Los óptimos además discrepan por activo — BTC prefiere 6 (+0.90%), ETH prefiere
+5 (+1.27%) y se desploma en 7 (−1.25%) — que es la firma de un pico agregado
+por promediar poblaciones distintas, no de un borde real.
+
+**Esto motivó dos experimentos, ambos negativos: ver §3.1.** Advertencia de
+método: esto es análisis de selección sobre trades realizados, no un backtest.
+Mide cómo les fue a las entradas que se tomaron; no simula qué habría pasado
+con el capital liberado ni con las entradas no tomadas. Esa distinción resultó
+ser exactamente la que invalidó la hipótesis.
+
 ## 3. Lo que NO funciona (probado, no asumido)
 
 | cambio | hipótesis que atacaba | W1 | W2 | W3 | veredicto |
@@ -179,6 +218,54 @@ El break-even también falla, y confirma por otro camino la nota ya documentada
 sobre el trailing ("dejar respirar bajo la activación"): las posiciones que
 vuelven a la entrada se recuperan con frecuencia suficiente como para que
 cortarlas planas cueste plata.
+
+### 3.1 La tendencia como regla de entrada — dos formas, las dos fallan
+
+§2.5 dejó una hipótesis con buena pinta: reemplazar el umbral de score por una
+condición nombrada, "no comprar bajo EMA200". Binaria, sin filo, con razón
+mecánica. Se probó en las dos formas en que existe el indicador.
+
+| variante | 18m | W1 | W2 | W3 | maxDD |
+|---|---|---|---|---|---|
+| *(producción)* | +5.77% | +5.32% | −0.63% | +1.87% | 10.2% |
+| bloquear bajo EMA200 | **−3.89%** | −1.28% | −0.91% | −0.96% | 6.9% |
+| EMA200 diaria real | **−7.53%** | +5.32% | **−11.51%** | +3.43% | **12.8%** |
+| EMA200 diaria + bloqueo | **−11.09%** | −1.28% | −11.51% | +0.70% | 11.6% |
+
+**Forma 1 — bloquear.** Peor en las tres ventanas. La razón es la advertencia
+de §2.5: quitar esas entradas no solo borra sus pérdidas, libera capital que
+termina en trades peores, cambia cooldowns y altera qué posiciones se abren
+después. El análisis de selección no autoriza la conclusión contrafáctica.
+
+**Forma 2 — usar una EMA200 de verdad.** `config.ema_trend = 200` declara una
+EMA200 **diaria**, pero `bot.py:345` pide `limit=90` velas diarias y la rama
+diaria de `strategy.py:84` exige ≥200, así que nunca corre: el bot siempre usó
+el fallback, una EMA de ~99 velas 4h (~16 días) etiquetada como EMA200. El
+harness replica esto fielmente — ambos truncan en 90. No es un bug de
+simulación.
+
+Al pasarle 250 velas diarias, el daño se concentra entero en W2, el tramo
+bajista: −0.63% → −11.51%, PF 0.36. W1 sale idéntico (en un bull el precio está
+sobre ambas medias) y W3 mejora. El mecanismo es que `above_ema_200` no
+alimenta solo el umbral de compra: alimenta el stop, que se ensancha ×1.6 en
+downtrend (v2.12). Con una EMA200 diaria el precio queda persistentemente
+debajo durante todo el bear, el bot clasifica el período entero como downtrend
+y opera con stops anchos justo cuando más caro sale. Además viola la
+restricción dura de 12% de drawdown (12.8%, 12.7%, 14.0%).
+
+**Conclusión: la "EMA200 de 16 días" no es un bug a corregir, es carga
+estructural.** El stop widening, el filtro de régimen y el score se calibraron
+todos contra esa media corta. Cambiar el indicador sin recalibrar lo que cuelga
+de él es estrictamente peor. Queda la deuda de nomenclatura — el nombre promete
+algo que el código no entrega — registrada en `config.indicators.daily_candles`
+con el default intacto en 90.
+
+**Lo que esto dice del pico del buy score.** La vía de descomposición se
+ejecutó completa: encontró un único componente predictivo y ese componente
+falló en las dos implementaciones posibles. El pico sigue sin resolverse, y la
+lectura es que **el alpha de esta estrategia no está en la selección de
+entrada**. Ni el umbral de score ni el filtro de tendencia producen una regla
+de entrada robusta fuera de la ventana donde se calibraron.
 
 ## 4. Lo que SÍ funciona
 
@@ -261,6 +348,12 @@ El objetivo — batir buy & hold por 3-5pp con maxDD ≤12% sobre 18 meses — s
 cumple con `min_buy_score=6` + `sell_partial=6`: **+16.61% vs +10.81%
 (+5.80pp), maxDD 10.4% (< 12%), PF 1.61 (> 1.38-1.40 actual)**, validado fuera
 de muestra en dos ventanas y en 4 de 6 sub-ventanas.
+
+Pero no está lista para capital real, y §2.5/§3.1 explican por qué mejor que
+esta sección: el pico del buy score no se resolvió. Se intentó por la vía
+correcta —descomponer el score y buscar una condición nombrada que lo
+reemplace— y esa vía se agotó sin encontrarla. Lo que queda en pie es que el
+alpha de esta estrategia no vive en la selección de entrada.
 
 Con una salvedad que pesa: el resultado cuelga de un parámetro con pico
 pronunciado. Mover el buy score un punto en cualquier dirección corta el

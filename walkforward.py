@@ -45,6 +45,8 @@ PROD = {
     "risk.time_stop_hours": 0.0,
     "risk.tp_arms_trailing": False,
     "scoring.global_min_buy_score": 0,
+    "regime.block_buys_below_ema200": False,
+    "indicators.daily_candles": 90,
     "scoring.sell_partial": 5,
     "risk.take_profit_pct": 0.03,
     "risk.tp_arm_trailing_distance": 0.0,
@@ -126,6 +128,27 @@ VARIANTS = {
                         "risk.take_profit_pct": 0.0,
                         "risk.trailing_stop_activation": 0.05,
                         "risk.trailing_stop_distance": 0.04}),
+    # ── v2.21: la tendencia como condicion nombrada, no como umbral de score.
+    #    Origen: descomposicion por componente sobre 206 entradas reales
+    #    (docs/backtests/walkforward-alpha §2.5). `ema_200` es el unico
+    #    componente que predice el resultado; el score no.
+    # EMA200 diaria REAL (con 90 velas la rama diaria nunca corre — ver config)
+    "d200":         v(**{"indicators.daily_candles": 250}),
+    "d200_sg6":     v(**{"indicators.daily_candles": 250,
+                         "scoring.sell_partial": 6}),
+    "d200_ms6_sg6": v(**{"indicators.daily_candles": 250,
+                         "scoring.global_min_buy_score": 6,
+                         "scoring.sell_partial": 6}),
+    "d200_block":   v(**{"indicators.daily_candles": 250,
+                         "regime.block_buys_below_ema200": True}),
+    "ema200":       v(**{"regime.block_buys_below_ema200": True}),
+    "ema200_sg6":   v(**{"regime.block_buys_below_ema200": True,
+                         "scoring.sell_partial": 6}),
+    "ema200_ms6":   v(**{"regime.block_buys_below_ema200": True,
+                         "scoring.global_min_buy_score": 6}),
+    "ema200_ms6_sg6": v(**{"regime.block_buys_below_ema200": True,
+                           "scoring.global_min_buy_score": 6,
+                           "scoring.sell_partial": 6}),
     "be_ts_s6_tpw": v(**{"risk.breakeven_trigger_pct": 0.010,
                          "risk.time_stop_hours": 48,
                          "scoring.global_min_buy_score": 6,

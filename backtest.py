@@ -223,7 +223,7 @@ class BacktestSim:
                 # 2) señales al cierre
                 window_4h = self.data[sym]["4h"][max(0, i - 99):i + 1]
                 daily_all = [c for c in self.data[sym]["daily"] if c["timestamp"] <= ts]
-                window_daily = daily_all[-90:]
+                window_daily = daily_all[-config.indicators.daily_candles:]
                 ind = self.strategy.compute_indicators(window_4h, window_daily)
 
                 # v2.21 EXPERIMENTAL — time-stop duro sobre posiciones en pérdida.
@@ -291,7 +291,11 @@ class BacktestSim:
                     buy_threshold = max(buy_threshold,
                                         config.scoring.global_min_buy_score)
                 if not ind["above_ema_200"]:
-                    buy_threshold = max(buy_threshold, 6)
+                    # v2.21 EXPERIMENTAL: bloquear en vez de encarecer.
+                    if config.regime.block_buys_below_ema200:
+                        buy_threshold = 99
+                    else:
+                        buy_threshold = max(buy_threshold, 6)
                 if sym == "BTCUSDT":
                     buy_threshold = max(buy_threshold, config.scoring.btc_min_buy_score)
 
