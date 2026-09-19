@@ -83,3 +83,33 @@ BNBUSDT antes de sumar el segundo símbolo, y el canario todavía no disparó ni
 una vez: no hubo compras de BNB desde el despliegue.
 
 Forzarlo ahora anularía la única razón de hacer rollout escalonado.
+
+### Actualización 2026-09-19 — el canario se movió a ETHUSDT
+
+Cuatro días después seguía sin disparar: **cero posiciones de BNBUSDT entre el
+2026-09-14 y el 2026-09-18**. El diagnóstico no es que el canario esté sano,
+es que nunca se ejecutó — los stops nativos solo se colocan sobre una posición
+viva. Eso además invalida el criterio de revisión: el punto 4 del checklist
+lee "silencio en el log = sano", pero sin posición abierta el silencio está
+garantizado y no distingue un reconciliador correcto de uno roto.
+
+La causa es la elección del símbolo. BNB es el **8%** de las entradas (18 de
+229 en 5.5 meses, una cada 4 días) contra **45%** de ETH. Un canario genera
+evidencia a la velocidad a la que opera su símbolo, así que ponerlo sobre el
+menos activo maximiza el tiempo hasta el veredicto — meses, en este caso.
+
+Se movió a **ETHUSDT** (`config.native_stops.enabled_symbols`). Sigue siendo un
+solo símbolo, así que la atribución se mantiene. El radio de daño sigue
+acotado por `margin_pct = 1.5%`: con el proceso vivo dispara siempre el stop
+del bot primero, y el nativo solo actúa si el bot está muerto — el escenario
+que el canario existe para validar.
+
+**El criterio de cierre no cambia**, y ahora sí se puede evaluar: una semana
+limpia con posiciones ETH abiertas, verificando los 5 puntos del checklist de
+`docs/superpowers/specs/2026-09-14-stops-nativos-bybit-design.md`. El punto 4
+recién es informativo cuando hay una posición viva: mirar varios scans
+seguidos sin compras ni ventas, con posición abierta. Silencio = sano;
+actividad recurrente = revertir a `[]` y revisar `_misma` en `native_stops.py`.
+
+Esto también corre la fecha de la decisión 2 (`uptrend_reentry`), que espera al
+cierre de este canario.

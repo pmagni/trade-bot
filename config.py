@@ -324,12 +324,28 @@ class NativeStopsConfig:
     así que la vigilancia de riesgo depende de que el proceso esté vivo. Esa es la
     causa del costo del blackout de jun-2026 (-$4.53 en dos posiciones ETH).
 
-    enabled_symbols vacío = apagado. El rollout es por canario: BNBUSDT primero.
+    enabled_symbols vacío = apagado. El rollout es por canario, un símbolo
+    por vez, para poder atribuir cualquier problema al símbolo que lo causó.
     """
-    # Canario v2.20: solo BNBUSDT. Menor exposicion del universo
-    # (~$13/posicion, +$1.54 historico). ETH y BTC entran despues de una
-    # semana limpia, uno por semana: si algo sale mal, se sabe cual fue.
-    enabled_symbols: list = field(default_factory=lambda: ["BNBUSDT"])
+    # Canario v2.20 — movido de BNBUSDT a ETHUSDT el 2026-09-19.
+    #
+    # Por qué se movió: BNBUSDT no produjo NINGUNA posición entre el 2026-09-14
+    # (inicio del canario) y el 2026-09-18. Los stops nativos solo se colocan
+    # cuando hay una posición viva, así que el canario nunca se ejecutó: cuatro
+    # días sin una sola prueba. Y eso invalida el criterio de revisión — el
+    # punto 4 del checklist dice "silencio en el log = sano", pero sin posición
+    # abierta el silencio está garantizado y no prueba nada.
+    #
+    # La causa es que el canario estaba sobre el símbolo menos operado: BNB es
+    # el 8% de las entradas (18 de 229 en 5.5 meses, una cada 4 días) contra
+    # 45% de ETH. Un canario genera evidencia a la velocidad a la que opera su
+    # símbolo; sobre BNB el veredicto tardaba meses.
+    #
+    # El radio de daño sigue acotado por `margin_pct`: el nativo va 1.5% por
+    # debajo del stop del bot, así que con el proceso vivo dispara siempre el
+    # stop propio primero. El nativo solo actúa si el bot está muerto, que es
+    # justamente el escenario que el canario tiene que validar.
+    enabled_symbols: list = field(default_factory=lambda: ["ETHUSDT"])
     margin_pct: float = 0.015   # el nativo va 1.5% bajo el stop del bot
 
 
