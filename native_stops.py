@@ -142,8 +142,17 @@ def _misma(stop: DesiredStop, orden: dict) -> bool:
     # mismo número de decimales antes de comparar.
     qty_deseada = _truncar_a_decimales(stop.qty, str(qty_str))
 
+    # Mismo problema con el trigger: `place_spot_stop_order` lo baja al tick
+    # del símbolo (floor) antes de mandarlo, y el exchange reporta ese valor
+    # ("2539.49") mientras el deseado sigue crudo (2539.49745). Una diferencia
+    # de medio tick supera rel_tol=1e-6 y la orden se recolocaba en cada scan
+    # (ETHUSDT, 2026-09-24). Truncar a los decimales reportados reproduce el
+    # floor para ticks potencia de diez (BTC/ETH/BNB spot: 0.01, 0.01, 0.1).
+    trigger_str = str(orden.get("triggerPrice") or "0")
+    trigger_deseado = _truncar_a_decimales(stop.trigger_price, trigger_str)
+
     return (math.isclose(qty, qty_deseada, rel_tol=1e-6)
-            and math.isclose(trigger, stop.trigger_price, rel_tol=1e-6))
+            and math.isclose(trigger, trigger_deseado, rel_tol=1e-6))
 
 
 def parse_position_id(link_id: str) -> Optional[int]:

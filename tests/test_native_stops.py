@@ -331,3 +331,21 @@ def test_qty_truncada_del_exchange_no_recoloca_en_loop():
         _orden(pos_id=1, qty="0.0115", trigger=str(stop.trigger_price), now_ms=NOW_MS)])
 
     assert plan == ReconcilePlan(to_place=[], to_cancel=[])
+
+
+def test_trigger_snapeado_al_tick_no_recoloca_en_loop():
+    """
+    Caso real (ETHUSDT, 2026-09-24): stop del bot 2578.17 → trigger deseado
+    2578.17 × 0.985 = 2539.49745. `place_spot_stop_order` lo baja al tick
+    (0.01) antes de mandarlo, así que el exchange reporta "2539.49". La
+    diferencia relativa (2.9e-6) supera la tolerancia de `_misma` y el
+    reconciliador cancelaba y recolocaba el mismo par en cada scan.
+    """
+    d = desired_stops([_pos(symbol="ETHUSDT", qty=0.00374, stop_loss=2578.17)],
+                      {"ETHUSDT": 2671.68}, margin=0.015, enabled=["ETHUSDT"],
+                      now_ms=NOW_MS)
+
+    plan = reconcile_plan(d, actual=[
+        _orden(pos_id=1, qty="0.00374", trigger="2539.49", now_ms=NOW_MS)])
+
+    assert plan == ReconcilePlan(to_place=[], to_cancel=[])
